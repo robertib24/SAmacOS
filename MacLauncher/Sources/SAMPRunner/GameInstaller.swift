@@ -305,14 +305,13 @@ class GameInstaller {
         // Run SA-MP installer using Wine in silent mode
         let wineManager = WineManager.shared
 
-        // SA-MP installer supports /S for silent install
-        // Wine will automatically detect and use the GTA SA installation
-        Logger.shared.info("Running SA-MP installer: wine \(installerURL.path) /S")
+        // Use 'wine start /unix' to handle Unix paths with spaces correctly
+        Logger.shared.info("Running SA-MP installer: wine start /unix \(installerURL.path) /S")
 
-        // Execute installer via Wine directly (no cmd /c needed)
+        // Execute installer via Wine using 'start /unix' for Unix path support
         let process = Process()
         process.executableURL = URL(fileURLWithPath: wineManager.winePath)
-        process.arguments = [installerURL.path, "/S"]
+        process.arguments = ["start", "/unix", installerURL.path, "/S"]
 
         var environment = ProcessInfo.processInfo.environment
         environment["WINEPREFIX"] = wineManager.winePrefix
@@ -337,8 +336,11 @@ class GameInstaller {
             try process.run()
             process.waitUntilExit()
 
+            // Give installer time to complete (start launches async)
+            sleep(3)
+
             if process.terminationStatus == 0 {
-                Logger.shared.info("SA-MP installer completed successfully")
+                Logger.shared.info("SA-MP installer launched successfully")
 
                 // Verify installation
                 let sampExe = gtaSAPath.appendingPathComponent("samp.exe")
