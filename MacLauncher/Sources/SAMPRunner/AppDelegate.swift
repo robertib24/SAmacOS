@@ -80,7 +80,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func showLauncherWindow() {
+    func showLauncherWindow() {
         // If main window already exists, just show it
         if let window = mainWindow {
             window.makeKeyAndOrderFront(nil)
