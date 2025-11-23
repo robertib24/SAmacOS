@@ -143,6 +143,11 @@ class GameInstaller {
                     try fileManager.createDirectory(at: parentDir, withIntermediateDirectories: true)
                 }
 
+                // Remove existing file if present (for re-installation)
+                if fileManager.fileExists(atPath: destURL.path) {
+                    try? fileManager.removeItem(at: destURL)
+                }
+
                 // Copy file
                 try fileManager.copyItem(at: fileURL, to: destURL)
 

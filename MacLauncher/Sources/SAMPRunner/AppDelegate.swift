@@ -73,8 +73,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             showInstallationWizard()
             userDefaults.set(true, forKey: "HasLaunchedBefore")
         } else {
-            // Check if installation is complete
-            if !gameInstaller.isGameInstalled() {
+            // Check if GTA SA is installed (not SA-MP, as it's optional/mock)
+            // Only require re-installation if GTA SA base game is missing
+            if !gameInstaller.verifyGTASAInstallation() {
                 showInstallationWizard()
             }
         }
