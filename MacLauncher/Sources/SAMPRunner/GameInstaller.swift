@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 /// Handles GTA SA and SA-MP installation
 class GameInstaller {
@@ -299,28 +300,69 @@ class GameInstaller {
     }
 
     private func extractAndInstallSAMP(from installerURL: URL) -> Bool {
-        // Extract SA-MP files from installer using Wine
-        // This would use wine to run the installer silently or extract manually
+        Logger.shared.info("Installing SA-MP from: \(installerURL.path)")
 
-        Logger.shared.info("Extracting SA-MP from: \(installerURL.path)")
+        // Run SA-MP installer using Wine in silent mode
+        let wineManager = WineManager.shared
 
-        // For now, we'll extract manually using 7zip or similar
-        // In production, this would use Wine to run the installer silently
+        // Convert macOS path to Wine Windows path
+        let winePath = installerURL.path.replacingOccurrences(of: "/Users", with: "Z:/Users")
 
-        let sampFiles = [
-            "samp.exe",
-            "samp.dll",
-            "samp.saa",
-            "rcon.exe"
-        ]
+        // Build Wine command to run installer silently
+        // SA-MP installer supports /S for silent install with /D for destination
+        let gtaSAWinePath = "C:\\Program Files\\Rockstar Games\\GTA San Andreas"
+        let installCommand = "\"\(winePath)\" /S /D=\(gtaSAWinePath)"
 
-        // Create SAMP directory
-        try? fileManager.createDirectory(at: sampPath, withIntermediateDirectories: true)
+        Logger.shared.info("Running SA-MP installer: wine cmd /c \(installCommand)")
 
-        // Mock extraction - in reality, would extract from installer
-        Logger.shared.info("SA-MP files would be extracted here")
+        // Execute installer via Wine
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: wineManager.winePath)
+        process.arguments = ["cmd", "/c", installCommand]
 
-        return true
+        var environment = ProcessInfo.processInfo.environment
+        environment["WINEPREFIX"] = wineManager.winePrefix
+        environment["WINEDEBUG"] = "-all" // Suppress Wine debug messages
+
+        // Check architecture for WINEARCH
+        var systemInfo = Darwin.utsname()
+        Darwin.uname(&systemInfo)
+        let machine = withUnsafePointer(to: &systemInfo.machine) {
+            $0.withMemoryRebound(to: CChar.self, capacity: 1) {
+                String(validatingUTF8: $0)
+            }
+        }
+        let isAppleSilicon = machine?.contains("arm64") ?? false
+        if !isAppleSilicon {
+            environment["WINEARCH"] = "win32"
+        }
+
+        process.environment = environment
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+
+            if process.terminationStatus == 0 {
+                Logger.shared.info("SA-MP installer completed successfully")
+
+                // Verify installation
+                let sampExe = gtaSAPath.appendingPathComponent("samp.exe")
+                if fileManager.fileExists(atPath: sampExe.path) {
+                    Logger.shared.info("SA-MP installation verified")
+                    return true
+                } else {
+                    Logger.shared.warning("SA-MP installer ran but files not found")
+                    return false
+                }
+            } else {
+                Logger.shared.error("SA-MP installer failed with status: \(process.terminationStatus)")
+                return false
+            }
+        } catch {
+            Logger.shared.error("Failed to run SA-MP installer: \(error.localizedDescription)")
+            return false
+        }
     }
 
     private func configureSAMP() {
