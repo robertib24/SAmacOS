@@ -19,12 +19,27 @@ class WineManager {
         winePrefixURL = appSupportURL.appendingPathComponent("wine")
 
         // Wine bundled with the app
-        if let bundlePath = Bundle.main.resourcePath {
+        if let bundlePath = Bundle.main.resourcePath,
+           FileManager.default.fileExists(atPath: bundlePath + "/wine/bin/wine") {
             wineExecutableURL = URL(fileURLWithPath: bundlePath)
                 .appendingPathComponent("wine/bin/wine")
         } else {
-            // Fallback to system wine
-            wineExecutableURL = URL(fileURLWithPath: "/usr/local/bin/wine")
+            // Fallback to system wine - detect based on architecture
+            let possiblePaths = [
+                "/opt/homebrew/bin/wine",    // Apple Silicon (M1/M2/M3)
+                "/usr/local/bin/wine",       // Intel Mac
+                "/Applications/Wine Stable.app/Contents/Resources/wine/bin/wine"  // Wine.app
+            ]
+
+            var foundPath: String?
+            for path in possiblePaths {
+                if FileManager.default.fileExists(atPath: path) {
+                    foundPath = path
+                    break
+                }
+            }
+
+            wineExecutableURL = URL(fileURLWithPath: foundPath ?? "/usr/local/bin/wine")
         }
     }
 
