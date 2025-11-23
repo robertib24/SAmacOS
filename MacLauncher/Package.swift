@@ -17,10 +17,7 @@ let package = Package(
         .executableTarget(
             name: "SAMPRunner",
             dependencies: [],
-            path: "Sources",
-            resources: [
-                .process("Resources")
-            ]
+            path: "Sources"
         )
     ]
 )
