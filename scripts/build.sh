@@ -37,11 +37,21 @@ cd "$MAC_LAUNCHER_DIR"
 # Clean previous build
 swift package clean
 
-# Build in release mode
-swift build -c release
+# Detect platform architecture
+ARCH=$(uname -m)
+if [[ "$ARCH" == "arm64" ]]; then
+    echo "Building for Apple Silicon (arm64)..."
+    BUILD_ARCH="arm64"
+else
+    echo "Building for Intel (x86_64)..."
+    BUILD_ARCH="x86_64"
+fi
+
+# Build in release mode with proper architecture
+swift build -c release --arch "$BUILD_ARCH"
 
 # Get build output location
-BUILD_OUTPUT=$(swift build -c release --show-bin-path)
+BUILD_OUTPUT=$(swift build -c release --arch "$BUILD_ARCH" --show-bin-path)
 
 echo "✓ Build complete"
 echo "Binary location: $BUILD_OUTPUT/SAMPRunner"
