@@ -68,7 +68,24 @@ class WineManager {
 
         var environment = ProcessInfo.processInfo.environment
         environment["WINEPREFIX"] = winePrefixURL.path
-        environment["WINEARCH"] = "win32"
+
+        // Don't set WINEARCH on Apple Silicon - Wine 8+ uses wow64 mode automatically
+        // On Intel, we can use win32 for better compatibility
+        var systemInfo = utsname()
+        uname(&systemInfo)
+        let machine = withUnsafePointer(to: &systemInfo.machine) {
+            $0.withMemoryRebound(to: CChar.self, capacity: 1) {
+                String(validatingUTF8: $0)
+            }
+        }
+        let isAppleSilicon = machine?.contains("arm64") ?? false
+
+        // Only set WINEARCH on Intel Macs
+        if !isAppleSilicon {
+            environment["WINEARCH"] = "win32"
+        }
+        // On Apple Silicon, Wine will use win64 with wow64 support for 32-bit apps
+
         environment["WINEDEBUG"] = "-all"  // Suppress debug output for setup
         process.environment = environment
 
@@ -144,7 +161,8 @@ class WineManager {
         // Setup environment variables for optimal performance
         var environment = ProcessInfo.processInfo.environment
         environment["WINEPREFIX"] = winePrefixURL.path
-        environment["WINEARCH"] = "win32"
+
+        // Don't set WINEARCH on Apple Silicon (wow64 handles it automatically)
 
         // DXVK settings
         environment["DXVK_HUD"] = "fps,devinfo,memory"
