@@ -24,7 +24,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        return true
+        // Don't quit when closing windows - keep app running in background
+        return false
     }
 
     // MARK: - Setup
@@ -80,6 +81,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showLauncherWindow() {
+        // If main window already exists, just show it
+        if let window = mainWindow {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -98,6 +106,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         self.launcherController = controller
 
         window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     private func showInstallationWizard() {

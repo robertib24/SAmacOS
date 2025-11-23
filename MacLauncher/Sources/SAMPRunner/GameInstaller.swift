@@ -12,8 +12,7 @@ class GameInstaller {
     // Required GTA SA files for verification
     private let requiredFiles = [
         "gta_sa.exe",
-        "data/gta3.img",
-        "models/gta3.img",
+        "models/gta3.img",  // Main game data (not in data/ folder!)
         "audio/CONFIG/BankLkup.dat"
     ]
 

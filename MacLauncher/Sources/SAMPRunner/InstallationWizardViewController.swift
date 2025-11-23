@@ -406,6 +406,10 @@ class InstallationWizardViewController: NSViewController {
         case .sampInstall, .optimization:
             break // Handled automatically
         case .complete:
+            // Close wizard window and show main launcher
+            if let appDelegate = NSApp.delegate as? AppDelegate {
+                appDelegate.showLauncherWindow()
+            }
             view.window?.close()
         }
     }
