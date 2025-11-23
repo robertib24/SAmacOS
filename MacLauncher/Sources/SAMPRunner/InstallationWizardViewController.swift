@@ -398,11 +398,15 @@ class InstallationWizardViewController: NSViewController {
         case .sampInstall, .optimization:
             break // Handled automatically
         case .complete:
-            // Close wizard window and show main launcher
+            // Show main launcher first, then close wizard
             if let appDelegate = NSApp.delegate as? AppDelegate {
                 appDelegate.showLauncherWindow()
             }
-            view.window?.close()
+
+            // Close wizard window after a short delay to prevent crash
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                self?.view.window?.close()
+            }
         }
     }
 
