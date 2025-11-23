@@ -56,6 +56,7 @@ BUILD_OUTPUT=$(swift build -c release --arch "$BUILD_ARCH" --show-bin-path)
 echo "✓ Build complete"
 echo "Binary location: $BUILD_OUTPUT/SAMPRunner"
 
+# IMPORTANT: Stay in MacLauncher directory for binary path resolution
 # Create application bundle
 echo "📱 Creating application bundle..."
 
@@ -70,24 +71,39 @@ mkdir -p "$APP_PATH/Contents/MacOS"
 mkdir -p "$APP_PATH/Contents/Resources"
 mkdir -p "$APP_PATH/Contents/Frameworks"
 
-# Find the binary (try multiple locations)
+# Find the binary (try multiple locations, from MacLauncher directory)
 BINARY_PATH=""
+
+# First try the exact path from swift build
 if [ -f "$BUILD_OUTPUT/SAMPRunner" ]; then
     BINARY_PATH="$BUILD_OUTPUT/SAMPRunner"
+    echo "✓ Found at: $BUILD_OUTPUT/SAMPRunner"
+# Try relative from current directory (MacLauncher)
 elif [ -f ".build/release/SAMPRunner" ]; then
-    BINARY_PATH=".build/release/SAMPRunner"
+    BINARY_PATH="$MAC_LAUNCHER_DIR/.build/release/SAMPRunner"
+    echo "✓ Found at: .build/release/SAMPRunner"
 elif [ -f ".build/$BUILD_ARCH-apple-macosx/release/SAMPRunner" ]; then
-    BINARY_PATH=".build/$BUILD_ARCH-apple-macosx/release/SAMPRunner"
+    BINARY_PATH="$MAC_LAUNCHER_DIR/.build/$BUILD_ARCH-apple-macosx/release/SAMPRunner"
+    echo "✓ Found at: .build/$BUILD_ARCH-apple-macosx/release/SAMPRunner"
+# Try absolute path construction
+elif [ -f "$MAC_LAUNCHER_DIR/.build/$BUILD_ARCH-apple-macosx/release/SAMPRunner" ]; then
+    BINARY_PATH="$MAC_LAUNCHER_DIR/.build/$BUILD_ARCH-apple-macosx/release/SAMPRunner"
+    echo "✓ Found at: $MAC_LAUNCHER_DIR/.build/$BUILD_ARCH-apple-macosx/release/SAMPRunner"
 else
     echo "❌ Error: Could not find SAMPRunner binary!"
     echo "   Searched in:"
     echo "   - $BUILD_OUTPUT/SAMPRunner"
     echo "   - .build/release/SAMPRunner"
     echo "   - .build/$BUILD_ARCH-apple-macosx/release/SAMPRunner"
+    echo "   - $MAC_LAUNCHER_DIR/.build/$BUILD_ARCH-apple-macosx/release/SAMPRunner"
+    echo ""
+    echo "   Listing .build directory contents:"
+    ls -la .build/ 2>/dev/null || echo "   .build directory not found"
+    find .build -name "SAMPRunner" -type f 2>/dev/null || echo "   No SAMPRunner binary found in .build"
     exit 1
 fi
 
-echo "Found binary at: $BINARY_PATH"
+echo "Copying binary from: $BINARY_PATH"
 
 # Copy binary
 cp "$BINARY_PATH" "$APP_PATH/Contents/MacOS/SA-MP Runner"
