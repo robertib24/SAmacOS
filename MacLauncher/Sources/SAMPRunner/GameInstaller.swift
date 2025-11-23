@@ -305,20 +305,14 @@ class GameInstaller {
         // Run SA-MP installer using Wine in silent mode
         let wineManager = WineManager.shared
 
-        // Convert macOS path to Wine Windows path
-        let winePath = installerURL.path.replacingOccurrences(of: "/Users", with: "Z:/Users")
+        // SA-MP installer supports /S for silent install
+        // Wine will automatically detect and use the GTA SA installation
+        Logger.shared.info("Running SA-MP installer: wine \(installerURL.path) /S")
 
-        // Build Wine command to run installer silently
-        // SA-MP installer supports /S for silent install with /D for destination
-        let gtaSAWinePath = "C:\\Program Files\\Rockstar Games\\GTA San Andreas"
-        let installCommand = "\"\(winePath)\" /S /D=\(gtaSAWinePath)"
-
-        Logger.shared.info("Running SA-MP installer: wine cmd /c \(installCommand)")
-
-        // Execute installer via Wine
+        // Execute installer via Wine directly (no cmd /c needed)
         let process = Process()
         process.executableURL = URL(fileURLWithPath: wineManager.winePath)
-        process.arguments = ["cmd", "/c", installCommand]
+        process.arguments = [installerURL.path, "/S"]
 
         var environment = ProcessInfo.processInfo.environment
         environment["WINEPREFIX"] = wineManager.winePrefix
