@@ -189,15 +189,15 @@ class WineManager {
 
         process.environment = environment
 
-        // Convert macOS path to Windows path for Wine
-        // Example: /Users/.../wine/drive_c/Program Files/... -> C:\Program Files\...
-        let windowsPath = convertToWindowsPath(executablePath)
-        process.arguments = [windowsPath] + arguments
+        // Wine can handle Unix paths directly - no need to convert to Windows paths
+        // Just pass the macOS path and Wine will convert it internally
+        process.arguments = [executablePath] + arguments
 
         // Set working directory to the game folder so samp.exe can find gta_sa.exe
         let gameDirectory = URL(fileURLWithPath: executablePath).deletingLastPathComponent()
         process.currentDirectoryURL = gameDirectory
         Logger.shared.info("Working directory: \(gameDirectory.path)")
+        Logger.shared.info("Executing: wine \(executablePath)")
 
         // Redirect output to log file
         let logURL = appSupportURL.appendingPathComponent("logs/wine_game.log")
