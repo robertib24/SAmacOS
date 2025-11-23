@@ -392,6 +392,14 @@ class SettingsViewController: NSViewController {
         applyButton.target = self
         applyButton.action = #selector(applyClicked)
         view.addSubview(applyButton)
+
+        // Reset Installation button
+        let resetButton = NSButton(frame: NSRect(x: 30, y: 30, width: 180, height: 32))
+        resetButton.title = "Reset Installation"
+        resetButton.bezelStyle = .rounded
+        resetButton.target = self
+        resetButton.action = #selector(resetInstallationClicked)
+        view.addSubview(resetButton)
     }
 
     @objc private func presetChanged() {
@@ -431,6 +439,60 @@ class SettingsViewController: NSViewController {
             confirmAlert.informativeText = "Shader cache has been cleared."
             confirmAlert.alertStyle = .informational
             confirmAlert.runModal()
+        }
+    }
+
+    @objc private func resetInstallationClicked() {
+        let alert = NSAlert()
+        alert.messageText = "Reset Installation?"
+        alert.informativeText = """
+        This will completely remove:
+        • Wine prefix and configuration
+        • Installed games and SA-MP
+        • All settings and cache
+
+        You will need to reinstall everything.
+
+        Are you sure?
+        """
+        alert.alertStyle = .critical
+        alert.addButton(withTitle: "Reset Everything")
+        alert.addButton(withTitle: "Cancel")
+
+        if alert.runModal() == .alertFirstButtonReturn {
+            performReset()
+        }
+    }
+
+    private func performReset() {
+        let fileManager = FileManager.default
+        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appDir = appSupport.appendingPathComponent("SA-MP Runner")
+
+        do {
+            // Remove entire application directory
+            try fileManager.removeItem(at: appDir)
+
+            // Reset user defaults
+            UserDefaults.standard.removeObject(forKey: "HasLaunchedBefore")
+            UserDefaults.standard.synchronize()
+
+            let alert = NSAlert()
+            alert.messageText = "Reset Complete"
+            alert.informativeText = "All data has been removed. Please restart the application to begin fresh installation."
+            alert.alertStyle = .informational
+            alert.runModal()
+
+            // Close settings and quit app
+            view.window?.close()
+            NSApp.terminate(nil)
+
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Reset Failed"
+            alert.informativeText = "Failed to remove data: \(error.localizedDescription)"
+            alert.alertStyle = .critical
+            alert.runModal()
         }
     }
 }
