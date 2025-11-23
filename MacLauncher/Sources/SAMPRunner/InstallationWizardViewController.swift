@@ -135,6 +135,7 @@ class InstallationWizardViewController: NSViewController {
             nextButton.title = "Install"
         case .complete:
             backButton.isEnabled = false
+            nextButton.isEnabled = true
             nextButton.title = "Finish"
             cancelButton.isEnabled = false
         }
