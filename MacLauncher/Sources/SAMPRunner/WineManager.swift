@@ -194,6 +194,11 @@ class WineManager {
         let windowsPath = convertToWindowsPath(executablePath)
         process.arguments = [windowsPath] + arguments
 
+        // Set working directory to the game folder so samp.exe can find gta_sa.exe
+        let gameDirectory = URL(fileURLWithPath: executablePath).deletingLastPathComponent()
+        process.currentDirectoryURL = gameDirectory
+        Logger.shared.info("Working directory: \(gameDirectory.path)")
+
         // Redirect output to log file
         let logURL = appSupportURL.appendingPathComponent("logs/wine_game.log")
         if let logFile = try? FileHandle(forWritingTo: logURL) {

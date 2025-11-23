@@ -168,6 +168,8 @@ class LauncherViewController: NSViewController {
     }
 
     private func launchGame() {
+        // Launch SA-MP client which shows server browser
+        // When user connects to a server, it will launch gta_sa.exe automatically
         let executablePath = gameInstaller.getSAMPExecutablePath()
 
         wineManager.launchGame(executablePath: executablePath) { success in
