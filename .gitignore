@@ -1,0 +1,55 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Xcode
+*.xcworkspace
+xcuserdata/
+*.xcscmblueprint
+*.xccheckout
+DerivedData/
+.build/
+Build/
+
+# Swift Package Manager
+.swiftpm/
+Packages/
+Package.resolved
+
+# Build artifacts
+build/
+*.app
+*.dmg
+*.pkg
+
+# Wine
+WineEngine/dlls/
+*.exe
+*.dll
+
+# Logs
+*.log
+logs/
+
+# Caches
+dxvk_cache/
+shader_cache/
+
+# Temporary
+temp/
+tmp/
+*.tmp
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Application data (for development)
+Library/
+
+# Downloaded resources
+downloads/

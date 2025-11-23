@@ -1,0 +1,32 @@
+# GTA San Andreas macOS Compatibility Patches
+# Applied automatically by SA-MP Runner installer
+
+## Patch 1: Frame Limiter Removal
+# Location: gta_sa.set
+# Change: FrameLimiter=1 -> FrameLimiter=0
+# Reason: Removes 25/30 FPS cap for smoother gameplay
+
+## Patch 2: Draw Distance Optimization
+# Location: gta_sa.set
+# Change: DrawDistance=1.0 -> DrawDistance=1.2
+# Reason: Better visuals without major performance hit on modern Macs
+
+## Patch 3: Audio Buffer Size
+# Location: Wine registry
+# Key: HKCU\Software\Wine\DirectSound\HelBuflen
+# Value: 512
+# Reason: Reduces audio latency and crackling
+
+## Patch 4: Memory Pool Sizes
+# Location: gta_sa.exe (hex edit - optional)
+# StreamingMemory: Increased for better texture loading
+# Requires: Binary patcher (not implemented yet)
+
+## Patch 5: Mouse Sensitivity
+# Location: gta_sa.set
+# Mouse sensitivity adjusted for macOS trackpad/mouse
+# Applied based on user preference
+
+## Patch 6: Resolution Fix
+# Auto-detect macOS screen resolution and set appropriately
+# Handles Retina displays correctly
