@@ -228,43 +228,126 @@ class GameInstaller {
     func installSAMP(version: String = "0.3.7", progress: @escaping (Double, String) -> Void, completion: @escaping (Bool, String?) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async {
             Logger.shared.info("Installing SA-MP version: \(version)")
-            progress(0.1, "Downloading SA-MP...")
+            progress(0.1, "Preparing SA-MP installation...")
 
-            // Download SA-MP
-            let downloadURL = self.getSAMPDownloadURL(version: version)
+            // Instead of downloading and running installer, download files directly
+            // This is more reliable than trying to run Windows installer through Wine
+            let success = self.downloadAndInstallSAMPFiles(version: version, progress: progress)
 
-            self.downloadFile(from: downloadURL) { fileURL in
-                guard let fileURL = fileURL else {
-                    DispatchQueue.main.async {
-                        completion(false, "Failed to download SA-MP")
-                    }
+            if success {
+                progress(0.9, "Configuring SA-MP...")
+                self.configureSAMP()
+
+                progress(1.0, "SA-MP installation complete!")
+
+                DispatchQueue.main.async {
+                    completion(true, nil)
+                }
+            } else {
+                DispatchQueue.main.async {
+                    completion(false, "Failed to install SA-MP files")
+                }
+            }
+        }
+    }
+
+    private func downloadAndInstallSAMPFiles(version: String, progress: @escaping (Double, String) -> Void) -> Bool {
+        Logger.shared.info("Installing SA-MP files for version: \(version)")
+
+        // SA-MP file URLs - using alternative mirrors since official site may be unreliable
+        let sampFiles = [
+            ("samp.exe", "https://github.com/dashr9230/SA-MP/releases/download/v0.3.7-R2/samp.exe"),
+            ("samp.dll", "https://github.com/dashr9230/SA-MP/releases/download/v0.3.7-R2/samp.dll"),
+            ("samp.saa", "https://github.com/dashr9230/SA-MP/releases/download/v0.3.7-R2/samp.saa")
+        ]
+
+        progress(0.2, "Downloading SA-MP files...")
+
+        var downloadedFiles: [(String, URL)] = []
+        let downloadGroup = DispatchGroup()
+        var downloadFailed = false
+
+        // Download each file
+        for (filename, urlString) in sampFiles {
+            guard let url = URL(string: urlString) else {
+                Logger.shared.error("Invalid URL for \(filename)")
+                downloadFailed = true
+                continue
+            }
+
+            downloadGroup.enter()
+
+            let task = URLSession.shared.downloadTask(with: url) { localURL, response, error in
+                defer { downloadGroup.leave() }
+
+                if let error = error {
+                    Logger.shared.error("Failed to download \(filename): \(error.localizedDescription)")
+                    downloadFailed = true
                     return
                 }
 
-                progress(0.5, "Extracting SA-MP...")
-
-                // Extract and install
-                let success = self.extractAndInstallSAMP(from: fileURL)
-
-                if success {
-                    progress(0.9, "Configuring SA-MP...")
-                    self.configureSAMP()
-
-                    progress(1.0, "SA-MP installation complete!")
-
-                    DispatchQueue.main.async {
-                        completion(true, nil)
-                    }
-                } else {
-                    DispatchQueue.main.async {
-                        completion(false, "Failed to extract SA-MP")
-                    }
+                guard let localURL = localURL else {
+                    Logger.shared.error("No local URL for \(filename)")
+                    downloadFailed = true
+                    return
                 }
 
-                // Clean up
-                try? self.fileManager.removeItem(at: fileURL)
+                // Save to temp location
+                let tempURL = self.appSupportURL.appendingPathComponent("temp/\(filename)")
+                try? self.fileManager.createDirectory(at: tempURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try? self.fileManager.removeItem(at: tempURL)
+
+                do {
+                    try self.fileManager.moveItem(at: localURL, to: tempURL)
+                    downloadedFiles.append((filename, tempURL))
+                    Logger.shared.info("Downloaded \(filename)")
+                } catch {
+                    Logger.shared.error("Failed to save \(filename): \(error.localizedDescription)")
+                    downloadFailed = true
+                }
+            }
+
+            task.resume()
+        }
+
+        // Wait for all downloads to complete
+        downloadGroup.wait()
+
+        if downloadFailed || downloadedFiles.count != sampFiles.count {
+            Logger.shared.error("Failed to download all SA-MP files")
+            return false
+        }
+
+        progress(0.6, "Installing SA-MP files...")
+
+        // Copy files to GTA SA directory
+        for (filename, tempURL) in downloadedFiles {
+            let destURL = gtaSAPath.appendingPathComponent(filename)
+
+            do {
+                // Remove existing file if present
+                try? fileManager.removeItem(at: destURL)
+
+                // Copy file
+                try fileManager.copyItem(at: tempURL, to: destURL)
+
+                // Make executable
+                if filename.hasSuffix(".exe") {
+                    try? fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: destURL.path)
+                }
+
+                Logger.shared.info("Installed \(filename)")
+
+                // Clean up temp file
+                try? fileManager.removeItem(at: tempURL)
+            } catch {
+                Logger.shared.error("Failed to install \(filename): \(error.localizedDescription)")
+                return false
             }
         }
+
+        Logger.shared.info("SA-MP files installed successfully")
+        return true
     }
 
     private func getSAMPDownloadURL(version: String) -> URL {
