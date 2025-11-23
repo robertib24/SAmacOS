@@ -168,7 +168,9 @@ class LauncherViewController: NSViewController {
     }
 
     private func launchGame() {
-        let executablePath = gameInstaller.getSAMPExecutablePath()
+        // Launch GTA SA (not samp.exe directly)
+        // SA-MP DLL will be automatically loaded by gta_sa.exe
+        let executablePath = gameInstaller.getGTASAExecutablePath()
 
         wineManager.launchGame(executablePath: executablePath) { success in
             if success {
