@@ -17,7 +17,14 @@ let package = Package(
         .executableTarget(
             name: "SAMPRunner",
             dependencies: [],
-            path: "Sources"
+            path: "Sources",
+            sources: [
+                "App/",
+                "UI/",
+                "WineManager/",
+                "Installer/",
+                "Performance/"
+            ]
         )
     ]
 )
