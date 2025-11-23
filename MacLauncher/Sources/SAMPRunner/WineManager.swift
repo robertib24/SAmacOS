@@ -188,7 +188,11 @@ class WineManager {
         environment["MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS"] = "1"
 
         process.environment = environment
-        process.arguments = [executablePath] + arguments
+
+        // Convert macOS path to Windows path for Wine
+        // Example: /Users/.../wine/drive_c/Program Files/... -> C:\Program Files\...
+        let windowsPath = convertToWindowsPath(executablePath)
+        process.arguments = [windowsPath] + arguments
 
         // Redirect output to log file
         let logURL = appSupportURL.appendingPathComponent("logs/wine_game.log")
@@ -283,6 +287,24 @@ class WineManager {
         }
 
         return "Unknown"
+    }
+
+    private func convertToWindowsPath(_ macPath: String) -> String {
+        // Convert macOS path to Windows path
+        // /Users/.../wine/drive_c/Program Files/... -> C:\Program Files\...
+        let driveCPrefix = winePrefixURL.path + "/drive_c/"
+
+        if macPath.hasPrefix(driveCPrefix) {
+            // Remove the drive_c prefix and convert to Windows path
+            let relativePath = String(macPath.dropFirst(driveCPrefix.count))
+            let windowsPath = "C:\\" + relativePath.replacingOccurrences(of: "/", with: "\\")
+            Logger.shared.info("Converted path: \(macPath) -> \(windowsPath)")
+            return windowsPath
+        } else {
+            // If path doesn't match expected format, return as-is and log warning
+            Logger.shared.warning("Path doesn't match Wine prefix format: \(macPath)")
+            return macPath
+        }
     }
 
     // MARK: - Utilities

@@ -8,7 +8,6 @@ class LauncherViewController: NSViewController {
     private var serverBrowserButton: NSButton!
     private var statusLabel: NSTextField!
     private var performanceLabel: NSTextField!
-    private var backgroundImageView: NSImageView!
 
     private let wineManager = WineManager.shared
     private let gameInstaller = GameInstaller.shared
@@ -36,23 +35,20 @@ class LauncherViewController: NSViewController {
     // MARK: - UI Setup
 
     private func setupUI() {
-        // Background
-        backgroundImageView = NSImageView(frame: view.bounds)
-        backgroundImageView.autoresizingMask = [.width, .height]
-        backgroundImageView.imageScaling = .scaleAxesIndependently
+        // Background - use CAGradientLayer instead of deprecated lockFocus/unlockFocus
+        view.wantsLayer = true
 
-        // Set a dark gradient background
-        let gradient = NSGradient(colors: [
-            NSColor(calibratedRed: 0.1, green: 0.1, blue: 0.15, alpha: 1.0),
-            NSColor(calibratedRed: 0.05, green: 0.05, blue: 0.1, alpha: 1.0)
-        ])
-        let gradientImage = NSImage(size: NSSize(width: 1, height: 600))
-        gradientImage.lockFocus()
-        gradient?.draw(in: NSRect(x: 0, y: 0, width: 1, height: 600), angle: 90)
-        gradientImage.unlockFocus()
-        backgroundImageView.image = gradientImage
+        let gradientLayer = CAGradientLayer()
+        gradientLayer.frame = view.bounds
+        gradientLayer.colors = [
+            NSColor(calibratedRed: 0.1, green: 0.1, blue: 0.15, alpha: 1.0).cgColor,
+            NSColor(calibratedRed: 0.05, green: 0.05, blue: 0.1, alpha: 1.0).cgColor
+        ]
+        gradientLayer.startPoint = CGPoint(x: 0.5, y: 0)
+        gradientLayer.endPoint = CGPoint(x: 0.5, y: 1)
+        gradientLayer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
 
-        view.addSubview(backgroundImageView)
+        view.layer?.insertSublayer(gradientLayer, at: 0)
 
         // Title
         let titleLabel = NSTextField(labelWithString: "SA-MP Runner")
