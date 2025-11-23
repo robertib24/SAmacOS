@@ -255,23 +255,26 @@ class GameInstaller {
         Logger.shared.info("Installing SA-MP files for version: \(version)")
 
         // SA-MP file URLs - using alternative mirrors since official site may be unreliable
-        let sampFiles = [
-            ("samp.exe", "https://github.com/dashr9230/SA-MP/releases/download/v0.3.7-R2/samp.exe"),
-            ("samp.dll", "https://github.com/dashr9230/SA-MP/releases/download/v0.3.7-R2/samp.dll"),
-            ("samp.saa", "https://github.com/dashr9230/SA-MP/releases/download/v0.3.7-R2/samp.saa")
+        // samp.saa is optional (audio archive)
+        let sampFiles: [(String, String, Bool)] = [
+            ("samp.exe", "https://github.com/dashr9230/SA-MP/releases/download/v0.3.7-R2/samp.exe", true),
+            ("samp.dll", "https://github.com/dashr9230/SA-MP/releases/download/v0.3.7-R2/samp.dll", true),
+            ("samp.saa", "https://github.com/dashr9230/SA-MP/releases/download/v0.3.7-R2/samp.saa", false)
         ]
 
         progress(0.2, "Downloading SA-MP files...")
 
         var downloadedFiles: [(String, URL)] = []
         let downloadGroup = DispatchGroup()
-        var downloadFailed = false
+        var criticalDownloadFailed = false
 
         // Download each file
-        for (filename, urlString) in sampFiles {
+        for (filename, urlString, required) in sampFiles {
             guard let url = URL(string: urlString) else {
                 Logger.shared.error("Invalid URL for \(filename)")
-                downloadFailed = true
+                if required {
+                    criticalDownloadFailed = true
+                }
                 continue
             }
 
@@ -282,13 +285,19 @@ class GameInstaller {
 
                 if let error = error {
                     Logger.shared.error("Failed to download \(filename): \(error.localizedDescription)")
-                    downloadFailed = true
+                    if required {
+                        criticalDownloadFailed = true
+                    } else {
+                        Logger.shared.warning("\(filename) is optional, continuing without it")
+                    }
                     return
                 }
 
                 guard let localURL = localURL else {
                     Logger.shared.error("No local URL for \(filename)")
-                    downloadFailed = true
+                    if required {
+                        criticalDownloadFailed = true
+                    }
                     return
                 }
 
@@ -303,7 +312,9 @@ class GameInstaller {
                     Logger.shared.info("Downloaded \(filename)")
                 } catch {
                     Logger.shared.error("Failed to save \(filename): \(error.localizedDescription)")
-                    downloadFailed = true
+                    if required {
+                        criticalDownloadFailed = true
+                    }
                 }
             }
 
@@ -313,15 +324,27 @@ class GameInstaller {
         // Wait for all downloads to complete
         downloadGroup.wait()
 
-        if downloadFailed || downloadedFiles.count != sampFiles.count {
-            Logger.shared.error("Failed to download all SA-MP files")
+        // Check if critical files were downloaded (samp.exe and samp.dll)
+        let hasRequiredFiles = downloadedFiles.contains { $0.0 == "samp.exe" } &&
+                               downloadedFiles.contains { $0.0 == "samp.dll" }
+
+        if criticalDownloadFailed || !hasRequiredFiles {
+            Logger.shared.error("Failed to download required SA-MP files")
             return false
         }
+
+        Logger.shared.info("Downloaded \(downloadedFiles.count) SA-MP file(s)")
 
         progress(0.6, "Installing SA-MP files...")
 
         // Copy files to GTA SA directory
         for (filename, tempURL) in downloadedFiles {
+            // Verify file exists before copying
+            guard fileManager.fileExists(atPath: tempURL.path) else {
+                Logger.shared.warning("Temp file not found for \(filename), skipping")
+                continue
+            }
+
             let destURL = gtaSAPath.appendingPathComponent(filename)
 
             do {
@@ -342,7 +365,12 @@ class GameInstaller {
                 try? fileManager.removeItem(at: tempURL)
             } catch {
                 Logger.shared.error("Failed to install \(filename): \(error.localizedDescription)")
-                return false
+                // Only fail if it's a critical file
+                if filename == "samp.exe" || filename == "samp.dll" {
+                    return false
+                } else {
+                    Logger.shared.warning("Continuing installation without \(filename)")
+                }
             }
         }
 
