@@ -2,13 +2,13 @@
 import PackageDescription
 
 let package = Package(
-    name: "SA-MP Runner",
+    name: "SAMPRunner",
     platforms: [
         .macOS(.v11)
     ],
     products: [
         .executable(
-            name: "SA-MP Runner",
+            name: "SAMPRunner",
             targets: ["SAMPRunner"]
         )
     ],
@@ -16,15 +16,7 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "SAMPRunner",
-            dependencies: [],
-            path: "Sources",
-            sources: [
-                "App/",
-                "UI/",
-                "WineManager/",
-                "Installer/",
-                "Performance/"
-            ]
+            dependencies: []
         )
     ]
 )
