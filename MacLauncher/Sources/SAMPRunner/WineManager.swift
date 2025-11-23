@@ -305,6 +305,15 @@ class WineManager {
             return false
         }
     }
+
+    // Public getters for Wine paths
+    var winePath: String {
+        return wineExecutableURL.path
+    }
+
+    var winePrefix: String {
+        return winePrefixURL.path
+    }
 }
 
 // MARK: - Wine Status
