@@ -154,7 +154,6 @@ class InstallationWizardViewController: NSViewController {
 
         You will need:
         • A legal copy of GTA San Andreas (Windows version)
-        • At least 5 GB of free disk space
         • macOS 11.0 or later
 
         Click Next to begin the installation process.
@@ -191,16 +190,8 @@ class InstallationWizardViewController: NSViewController {
             allGood = false
         }
 
-        // Check disk space
-        if let diskSpace = getAvailableDiskSpace() {
-            let diskGB = Double(diskSpace) / 1024.0 / 1024.0 / 1024.0
-            if diskGB >= 5 {
-                statusText += "✓ Disk space: \(String(format: "%.1f GB", diskGB))\n"
-            } else {
-                statusText += "✗ Disk space: \(String(format: "%.1f GB", diskGB)) (need 5+ GB)\n"
-                allGood = false
-            }
-        }
+        // Disk space check removed - not required
+        // Users can install with any available space
 
         // Check Metal support
         statusText += "✓ GPU: \(systemInfo.gpuName)\n"
