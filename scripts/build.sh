@@ -70,8 +70,27 @@ mkdir -p "$APP_PATH/Contents/MacOS"
 mkdir -p "$APP_PATH/Contents/Resources"
 mkdir -p "$APP_PATH/Contents/Frameworks"
 
+# Find the binary (try multiple locations)
+BINARY_PATH=""
+if [ -f "$BUILD_OUTPUT/SAMPRunner" ]; then
+    BINARY_PATH="$BUILD_OUTPUT/SAMPRunner"
+elif [ -f ".build/release/SAMPRunner" ]; then
+    BINARY_PATH=".build/release/SAMPRunner"
+elif [ -f ".build/$BUILD_ARCH-apple-macosx/release/SAMPRunner" ]; then
+    BINARY_PATH=".build/$BUILD_ARCH-apple-macosx/release/SAMPRunner"
+else
+    echo "❌ Error: Could not find SAMPRunner binary!"
+    echo "   Searched in:"
+    echo "   - $BUILD_OUTPUT/SAMPRunner"
+    echo "   - .build/release/SAMPRunner"
+    echo "   - .build/$BUILD_ARCH-apple-macosx/release/SAMPRunner"
+    exit 1
+fi
+
+echo "Found binary at: $BINARY_PATH"
+
 # Copy binary
-cp "$BUILD_OUTPUT/SAMPRunner" "$APP_PATH/Contents/MacOS/SA-MP Runner"
+cp "$BINARY_PATH" "$APP_PATH/Contents/MacOS/SA-MP Runner"
 chmod +x "$APP_PATH/Contents/MacOS/SA-MP Runner"
 
 # Copy Wine binaries (if bundled)
