@@ -37,6 +37,9 @@ class WineManager {
                 return
             }
 
+            // Install DXVK to Wine prefix if available in WineEngine
+            self.installDXVKToPrefix()
+
             // Configure Wine - try DXVK first if available
             let useDXVK = self.isDXVKInstalled()
             self.configureWine(useDXVK: useDXVK)
@@ -97,6 +100,111 @@ class WineManager {
                     Logger.shared.info("Removed \(file) from Game Folder")
                 }
             }
+        }
+    }
+
+    /// Install DXVK DLLs from WineEngine to Wine prefix
+    private func installDXVKToPrefix() {
+        let fileManager = FileManager.default
+
+        // Check if DXVK DLLs are available in WineEngine
+        guard let bundlePath = Bundle.main.resourcePath else {
+            Logger.shared.debug("Bundle path not found, checking project root...")
+            return installDXVKFromProjectRoot()
+        }
+
+        let wineEngineDLLs = URL(fileURLWithPath: bundlePath)
+            .appendingPathComponent("WineEngine/dlls/x32")
+
+        // Fallback: check in project root
+        if !fileManager.fileExists(atPath: wineEngineDLLs.path) {
+            Logger.shared.debug("WineEngine DLLs not in bundle, checking project root...")
+            return installDXVKFromProjectRoot()
+        }
+
+        // Get DXVK DLLs
+        guard let dllFiles = try? fileManager.contentsOfDirectory(atPath: wineEngineDLLs.path) else {
+            Logger.shared.debug("No DXVK DLLs found in WineEngine")
+            return
+        }
+
+        let dxvkDlls = dllFiles.filter { $0.hasSuffix(".dll") }
+
+        if dxvkDlls.isEmpty {
+            Logger.shared.debug("No DXVK DLLs found to install")
+            return
+        }
+
+        Logger.shared.info("Installing DXVK DLLs to Wine prefix...")
+
+        // Copy to Wine prefix system32
+        let system32 = winePrefixURL.appendingPathComponent("drive_c/windows/system32")
+        try? fileManager.createDirectory(at: system32, withIntermediateDirectories: true)
+
+        var installedCount = 0
+        for dll in dxvkDlls {
+            let source = wineEngineDLLs.appendingPathComponent(dll)
+            let dest = system32.appendingPathComponent(dll)
+
+            // Remove existing DLL
+            try? fileManager.removeItem(at: dest)
+
+            // Copy new DLL
+            do {
+                try fileManager.copyItem(at: source, to: dest)
+                installedCount += 1
+                Logger.shared.debug("Installed \(dll)")
+            } catch {
+                Logger.shared.warning("Failed to install \(dll): \(error.localizedDescription)")
+            }
+        }
+
+        if installedCount > 0 {
+            Logger.shared.info("✓ Installed \(installedCount) DXVK DLLs to Wine prefix")
+        }
+    }
+
+    /// Install DXVK from project root (fallback for development builds)
+    private func installDXVKFromProjectRoot() {
+        let fileManager = FileManager.default
+        let currentDir = fileManager.currentDirectoryPath
+        let wineEngineDLLs = URL(fileURLWithPath: currentDir)
+            .appendingPathComponent("WineEngine/dlls/x32")
+
+        guard fileManager.fileExists(atPath: wineEngineDLLs.path),
+              let dllFiles = try? fileManager.contentsOfDirectory(atPath: wineEngineDLLs.path) else {
+            Logger.shared.debug("DXVK DLLs not found in project root either")
+            return
+        }
+
+        let dxvkDlls = dllFiles.filter { $0.hasSuffix(".dll") }
+
+        if dxvkDlls.isEmpty {
+            return
+        }
+
+        Logger.shared.info("Installing DXVK DLLs from project root...")
+
+        let system32 = winePrefixURL.appendingPathComponent("drive_c/windows/system32")
+        try? fileManager.createDirectory(at: system32, withIntermediateDirectories: true)
+
+        var installedCount = 0
+        for dll in dxvkDlls {
+            let source = wineEngineDLLs.appendingPathComponent(dll)
+            let dest = system32.appendingPathComponent(dll)
+
+            try? fileManager.removeItem(at: dest)
+
+            do {
+                try fileManager.copyItem(at: source, to: dest)
+                installedCount += 1
+            } catch {
+                Logger.shared.warning("Failed to install \(dll): \(error.localizedDescription)")
+            }
+        }
+
+        if installedCount > 0 {
+            Logger.shared.info("✓ Installed \(installedCount) DXVK DLLs from project root")
         }
     }
 
