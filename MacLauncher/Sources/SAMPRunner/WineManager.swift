@@ -111,37 +111,16 @@ class WineManager {
         runWineCommand("reg", arguments: ["delete", "HKCU\\Software\\Wine\\DllOverrides", "/v", "d3d9", "/f"])
         runWineCommand("reg", arguments: ["delete", "HKCU\\Software\\Wine\\DllOverrides", "/v", "dxgi", "/f"])
 
-        // 5. PERFORMANCE: WineD3D optimizations pentru Direct3D9
-        // M2 OPTIMIZED: 3 threads pentru CSMT (nu 7 - prea mult pentru 8GB RAM)
-        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "csmt", "/t", "REG_DWORD", "/d", "3", "/f"])
+        // 5. PERFORMANCE: WineD3D basic optimizations
         runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "DirectDrawRenderer", "/d", "opengl", "/f"])
         runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "OffScreenRenderingMode", "/d", "fbo", "/f"])
-        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "StrictDrawOrdering", "/d", "disabled", "/f"])
 
         // 6. COLOR FIX: Pixel format si color depth
-        // Fortam 32-bit color pentru a evita probleme cu culorile
         runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "PixelShaderMode", "/d", "enabled", "/f"])
         runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\X11 Driver", "/v", "ScreenDepth", "/t", "REG_DWORD", "/d", "32", "/f"])
 
-        // 7. SHADER FIX: Dezactivam GLSL daca cauzeaza probleme cu culorile
-        // ARB shaders sunt mai stabili pe macOS pentru jocuri vechi
+        // 7. SHADER FIX: ARB shaders mai stabili pe macOS
         runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "UseGLSL", "/d", "disabled", "/f"])
-
-        // 8. PERFORMANCE: Memory optimizations - M2 8GB OPTIMIZED
-        // 3GB pentru VRAM (nu 8GB - ar cauza swap si lag pe sistem cu 8GB RAM)
-        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "VideoMemorySize", "/t", "REG_DWORD", "/d", "3072", "/f"])
-
-        // 9. RENDERING PERFORMANCE: Dezactivam AlwaysOffscreen pentru FPS mai bun
-        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "AlwaysOffscreen", "/d", "disabled", "/f"])
-
-        // 10. FPS BOOST: Optimizari agresive pentru performance maxim
-        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "RenderTargetLockMode", "/d", "disabled", "/f"])
-        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "Multisampling", "/d", "disabled", "/f"])
-        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "SampleCount", "/t", "REG_DWORD", "/d", "1", "/f"])
-
-        // 11. M2 SPECIFIC: MaxShaderModelVS/PS pentru a reduce overhead
-        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "MaxShaderModelVS", "/t", "REG_DWORD", "/d", "2", "/f"])
-        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "MaxShaderModelPS", "/t", "REG_DWORD", "/d", "2", "/f"])
     }
 
     // MARK: - Execution
@@ -251,10 +230,8 @@ class WineManager {
             let isInstaller = self.isInstaller(executablePath)
             if isInstaller {
                 self.applySafeModeForInstaller()
-            } else {
-                // Pentru joc (nu installer), aplicam low-end patch pentru M2 8GB
-                self.applyLowEndPatch(gameDir: gameDir)
             }
+            // REMOVED: low-end patch - made performance worse
 
             let success = self.runWineProcess(path: executablePath, args: arguments, isInstaller: isInstaller)
 
