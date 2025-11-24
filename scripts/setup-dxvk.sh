@@ -13,8 +13,8 @@ WINE_ENGINE_DIR="$PROJECT_ROOT/WineEngine"
 
 echo "🎮 Setting up DXVK for SA-MP Runner (M2 8GB optimized)..."
 
-# DXVK version - 2.3 is more stable on macOS
-DXVK_VERSION="2.3"
+# DXVK version - 2.7.1 is latest stable
+DXVK_VERSION="2.7.1"
 
 # Create directories
 mkdir -p "$DXVK_DIR"
@@ -31,9 +31,9 @@ cd "$TEMP_DIR"
 
 # Download
 if command -v curl &> /dev/null; then
-    curl -L -o dxvk.tar.gz "$DXVK_URL"
+    curl -L -A "Mozilla/5.0" -o dxvk.tar.gz "$DXVK_URL"
 elif command -v wget &> /dev/null; then
-    wget -O dxvk.tar.gz "$DXVK_URL"
+    wget --user-agent="Mozilla/5.0" -O dxvk.tar.gz "$DXVK_URL"
 else
     echo "❌ Neither curl nor wget found. Please install one."
     exit 1
