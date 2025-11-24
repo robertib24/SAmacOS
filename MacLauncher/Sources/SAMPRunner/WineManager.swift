@@ -103,14 +103,14 @@ class WineManager {
         }
     }
 
-    /// Install DXVK DLLs from WineEngine to Wine prefix
-    private func installDXVKToPrefix() {
+    /// Install DXVK DLLs from WineEngine to Wine prefix AND game folder
+    private func installDXVKToPrefix(gameFolder: URL? = nil) {
         let fileManager = FileManager.default
 
         // Check if DXVK DLLs are available in WineEngine
         guard let bundlePath = Bundle.main.resourcePath else {
             Logger.shared.debug("Bundle path not found, checking project root...")
-            return installDXVKFromProjectRoot()
+            return installDXVKFromProjectRoot(gameFolder: gameFolder)
         }
 
         let wineEngineDLLs = URL(fileURLWithPath: bundlePath)
@@ -119,7 +119,7 @@ class WineManager {
         // Fallback: check in project root
         if !fileManager.fileExists(atPath: wineEngineDLLs.path) {
             Logger.shared.debug("WineEngine DLLs not in bundle, checking project root...")
-            return installDXVKFromProjectRoot()
+            return installDXVKFromProjectRoot(gameFolder: gameFolder)
         }
 
         // Get DXVK DLLs
@@ -135,9 +135,9 @@ class WineManager {
             return
         }
 
-        Logger.shared.info("Installing DXVK DLLs to Wine prefix...")
+        Logger.shared.info("Installing DXVK DLLs to Wine prefix and game folder...")
 
-        // Copy to Wine prefix system32
+        // 1. Copy to Wine prefix system32
         let system32 = winePrefixURL.appendingPathComponent("drive_c/windows/system32")
         try? fileManager.createDirectory(at: system32, withIntermediateDirectories: true)
 
@@ -146,26 +146,47 @@ class WineManager {
             let source = wineEngineDLLs.appendingPathComponent(dll)
             let dest = system32.appendingPathComponent(dll)
 
-            // Remove existing DLL
             try? fileManager.removeItem(at: dest)
 
-            // Copy new DLL
             do {
                 try fileManager.copyItem(at: source, to: dest)
                 installedCount += 1
-                Logger.shared.debug("Installed \(dll)")
+                Logger.shared.debug("Installed \(dll) to system32")
             } catch {
-                Logger.shared.warning("Failed to install \(dll): \(error.localizedDescription)")
+                Logger.shared.warning("Failed to install \(dll) to system32: \(error.localizedDescription)")
             }
         }
 
         if installedCount > 0 {
             Logger.shared.info("✓ Installed \(installedCount) DXVK DLLs to Wine prefix")
         }
+
+        // 2. Copy to game folder (Wine checks game folder first!)
+        if let gameFolderURL = gameFolder {
+            var gameInstalledCount = 0
+            for dll in dxvkDlls {
+                let source = wineEngineDLLs.appendingPathComponent(dll)
+                let dest = gameFolderURL.appendingPathComponent(dll)
+
+                try? fileManager.removeItem(at: dest)
+
+                do {
+                    try fileManager.copyItem(at: source, to: dest)
+                    gameInstalledCount += 1
+                    Logger.shared.debug("Installed \(dll) to game folder")
+                } catch {
+                    Logger.shared.warning("Failed to install \(dll) to game folder: \(error.localizedDescription)")
+                }
+            }
+
+            if gameInstalledCount > 0 {
+                Logger.shared.info("✓ Installed \(gameInstalledCount) DXVK DLLs to game folder")
+            }
+        }
     }
 
     /// Install DXVK from project root (fallback for development builds)
-    private func installDXVKFromProjectRoot() {
+    private func installDXVKFromProjectRoot(gameFolder: URL? = nil) {
         let fileManager = FileManager.default
         let currentDir = fileManager.currentDirectoryPath
         let wineEngineDLLs = URL(fileURLWithPath: currentDir)
@@ -185,6 +206,7 @@ class WineManager {
 
         Logger.shared.info("Installing DXVK DLLs from project root...")
 
+        // 1. Copy to Wine prefix system32
         let system32 = winePrefixURL.appendingPathComponent("drive_c/windows/system32")
         try? fileManager.createDirectory(at: system32, withIntermediateDirectories: true)
 
@@ -205,6 +227,28 @@ class WineManager {
 
         if installedCount > 0 {
             Logger.shared.info("✓ Installed \(installedCount) DXVK DLLs from project root")
+        }
+
+        // 2. Copy to game folder (Wine checks game folder first!)
+        if let gameFolderURL = gameFolder {
+            var gameInstalledCount = 0
+            for dll in dxvkDlls {
+                let source = wineEngineDLLs.appendingPathComponent(dll)
+                let dest = gameFolderURL.appendingPathComponent(dll)
+
+                try? fileManager.removeItem(at: dest)
+
+                do {
+                    try fileManager.copyItem(at: source, to: dest)
+                    gameInstalledCount += 1
+                } catch {
+                    Logger.shared.warning("Failed to install \(dll) to game folder: \(error.localizedDescription)")
+                }
+            }
+
+            if gameInstalledCount > 0 {
+                Logger.shared.info("✓ Installed \(gameInstalledCount) DXVK DLLs to game folder (project root)")
+            }
         }
     }
 
@@ -384,9 +428,11 @@ class WineManager {
                 self.applySafeModeForInstaller()
             }
 
-            // Install DXVK DLLs to Wine prefix if available
+            // Install DXVK DLLs to Wine prefix AND game folder if available
             if !isInstaller {
-                self.installDXVKToPrefix()
+                // Get game folder from executable path
+                let gameFolder = URL(fileURLWithPath: executablePath).deletingLastPathComponent()
+                self.installDXVKToPrefix(gameFolder: gameFolder)
             }
 
             // Detect if DXVK is available
