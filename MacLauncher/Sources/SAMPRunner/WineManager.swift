@@ -36,11 +36,17 @@ class WineManager {
                 DispatchQueue.main.async { completion(false, "Wine boot failed") }
                 return
             }
-            
-            // Curatam DXVK si configuram Wine standard
-            self.removeDXVK(targetFolder: nil)
-            self.configureWine()
-            
+
+            // Configure Wine - try DXVK first if available
+            let useDXVK = self.isDXVKInstalled()
+            self.configureWine(useDXVK: useDXVK)
+
+            if useDXVK {
+                Logger.shared.info("Wine prefix configured with DXVK")
+            } else {
+                Logger.shared.info("Wine prefix configured with WineD3D (DXVK not found)")
+            }
+
             DispatchQueue.main.async { completion(true, nil) }
         }
     }
@@ -94,33 +100,51 @@ class WineManager {
         }
     }
 
-    private func configureWine() {
+    /// Check if DXVK is installed
+    private func isDXVKInstalled() -> Bool {
+        let system32 = winePrefixURL.appendingPathComponent("drive_c/windows/system32")
+        let dxvkDll = system32.appendingPathComponent("d3d9.dll")
+        return FileManager.default.fileExists(atPath: dxvkDll.path)
+    }
+
+    private func configureWine(useDXVK: Bool = true) {
         // 1. FIX: Windows XP (Compatibilitate maxima)
         runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine", "/v", "Version", "/d", "winxp", "/f"])
 
         // 2. FIX: Virtual Desktop @ 1280x720
-        // Acesta este singurul mod de a evita eroarea "Cannot find 800x600 video mode"
         runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Explorer", "/v", "Desktop", "/d", "Default", "/f"])
         runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Explorer\\Desktops", "/v", "Default", "/d", "1280x720", "/f"])
 
         // 3. Audio Fix
         runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\DirectSound", "/v", "HelBuflen", "/d", "512", "/f"])
 
-        // 4. CLEANUP: Stergem override-urile DXVK din registry
-        // Astfel Wine va folosi "builtin" (WineD3D) in loc de "native" (DXVK)
-        runWineCommand("reg", arguments: ["delete", "HKCU\\Software\\Wine\\DllOverrides", "/v", "d3d9", "/f"])
-        runWineCommand("reg", arguments: ["delete", "HKCU\\Software\\Wine\\DllOverrides", "/v", "dxgi", "/f"])
+        // 4. DXVK vs WineD3D configuration
+        if useDXVK && isDXVKInstalled() {
+            Logger.shared.info("Configuring Wine for DXVK (DirectX → Vulkan → Metal)")
 
-        // 5. PERFORMANCE: WineD3D basic optimizations
-        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "DirectDrawRenderer", "/d", "opengl", "/f"])
-        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "OffScreenRenderingMode", "/d", "fbo", "/f"])
+            // Enable DXVK DLL overrides
+            runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\DllOverrides", "/v", "d3d9", "/d", "native", "/f"])
+            runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\DllOverrides", "/v", "dxgi", "/d", "native", "/f"])
 
-        // 6. COLOR FIX: Pixel format si color depth
-        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "PixelShaderMode", "/d", "enabled", "/f"])
-        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\X11 Driver", "/v", "ScreenDepth", "/t", "REG_DWORD", "/d", "32", "/f"])
+            // DXVK-specific registry settings
+            runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "PixelShaderMode", "/d", "enabled", "/f"])
+            runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\X11 Driver", "/v", "ScreenDepth", "/t", "REG_DWORD", "/d", "32", "/f"])
+        } else {
+            Logger.shared.info("Configuring Wine for WineD3D (fallback mode)")
 
-        // 7. SHADER FIX: ARB shaders mai stabili pe macOS
-        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "UseGLSL", "/d", "disabled", "/f"])
+            // Remove DXVK DLL overrides - use WineD3D
+            runWineCommand("reg", arguments: ["delete", "HKCU\\Software\\Wine\\DllOverrides", "/v", "d3d9", "/f"])
+            runWineCommand("reg", arguments: ["delete", "HKCU\\Software\\Wine\\DllOverrides", "/v", "dxgi", "/f"])
+
+            // WineD3D optimizations
+            runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "DirectDrawRenderer", "/d", "opengl", "/f"])
+            runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "OffScreenRenderingMode", "/d", "fbo", "/f"])
+            runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "PixelShaderMode", "/d", "enabled", "/f"])
+            runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\X11 Driver", "/v", "ScreenDepth", "/t", "REG_DWORD", "/d", "32", "/f"])
+
+            // ARB shaders (more stable than GLSL on macOS)
+            runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "UseGLSL", "/d", "disabled", "/f"])
+        }
     }
 
     // MARK: - Execution
@@ -222,18 +246,16 @@ class WineManager {
         if isRunning { completion(false); return }
 
         DispatchQueue.global(qos: .userInitiated).async {
-            // Asiguram curatarea DXVK inainte de fiecare lansare
-            let gameDir = URL(fileURLWithPath: executablePath).deletingLastPathComponent()
-            self.removeDXVK(targetFolder: gameDir)
-
             // Detectam daca e installer si aplicam safe mode
             let isInstaller = self.isInstaller(executablePath)
             if isInstaller {
                 self.applySafeModeForInstaller()
             }
-            // REMOVED: low-end patch - made performance worse
 
-            let success = self.runWineProcess(path: executablePath, args: arguments, isInstaller: isInstaller)
+            // Detect if DXVK is available
+            let useDXVK = self.isDXVKInstalled() && !isInstaller
+
+            let success = self.runWineProcess(path: executablePath, args: arguments, isInstaller: isInstaller, useDXVK: useDXVK)
 
             // Daca a fost installer, restabilim virtual desktop
             if isInstaller {
@@ -244,7 +266,7 @@ class WineManager {
         }
     }
 
-    private func runWineProcess(path: String, args: [String], isInstaller: Bool = false) -> Bool {
+    private func runWineProcess(path: String, args: [String], isInstaller: Bool = false, useDXVK: Bool = false) -> Bool {
         let process = Process()
         process.executableURL = wineExecutableURL
 
@@ -252,27 +274,48 @@ class WineManager {
         env["WINEPREFIX"] = winePrefixURL.path
         env["WINEDEBUG"] = "-all"
 
-        // Eliminam variabilele DXVK pentru a fi siguri
-        env.removeValue(forKey: "DXVK_HUD")
-        env.removeValue(forKey: "DXVK_ASYNC")
-
         if !isInstaller {
-            // PERFORMANCE BOOST: Enable CSMT (Command Stream Multi-Threading)
-            // Aceasta este cea mai importanta optimizare pentru WineD3D!
-            env["CSMT"] = "enabled"
-            env["STAGING_SHARED_MEMORY"] = "1"
+            if useDXVK {
+                // DXVK MODE - DirectX → Vulkan → Metal
+                Logger.shared.info("Using DXVK for rendering")
 
-            // PERFORMANCE BOOST: Wine optimizations
-            env["WINE_LARGE_ADDRESS_AWARE"] = "1"  // Mai mult RAM pentru joc (pana la 3GB)
+                // DXVK environment variables
+                env["DXVK_HUD"] = "0"  // Disable HUD for performance
+                env["DXVK_ASYNC"] = "1"  // Async shader compilation
+                env["DXVK_STATE_CACHE_PATH"] = appSupportURL.appendingPathComponent("dxvk_cache").path
+                env["DXVK_LOG_LEVEL"] = "warn"
+                env["DXVK_CONFIG_FILE"] = appSupportURL.appendingPathComponent("../GameOptimizations/dxvk/dxvk.conf").path
 
-            // M2 8GB OPTIMIZED: Reduce cache size pentru a nu consuma prea mult RAM
-            env["__GL_SHADER_DISK_CACHE_SIZE"] = "268435456"  // 256MB shader cache (nu 1GB)
-            env["__GL_SYNC_TO_VBLANK"] = "0"  // Disable vsync la driver level
+                // MoltenVK optimizations for M2 8GB
+                env["MVK_CONFIG_LOG_LEVEL"] = "1"  // Errors only
+                env["MVK_CONFIG_TRACE_VULKAN_CALLS"] = "0"
+                env["MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS"] = "0"  // Async
+                env["MVK_CONFIG_PREFILL_METAL_COMMAND_BUFFERS"] = "1"
+                env["MVK_ALLOW_METAL_FENCES"] = "1"
+                env["MVK_ALLOW_METAL_EVENTS"] = "1"
+                env["MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS"] = "1"
 
-            // REMOVED: esync/fsync - cauzeaza probleme de performance si culori
-            // REMOVED: __GL_THREADED_OPTIMIZATIONS - poate cauza overhead pe M2
+                // M2 8GB: Conservative memory settings
+                env["VK_ICD_FILENAMES"] = "/usr/local/share/vulkan/icd.d/MoltenVK_icd.json"
+            } else {
+                // WineD3D MODE - Native Wine Direct3D
+                Logger.shared.info("Using WineD3D for rendering (fallback)")
 
-            // PERFORMANCE: Apple Silicon M2 - optimized CPU topology
+                // Remove DXVK vars
+                env.removeValue(forKey: "DXVK_HUD")
+                env.removeValue(forKey: "DXVK_ASYNC")
+
+                // CSMT for WineD3D
+                env["CSMT"] = "enabled"
+                env["STAGING_SHARED_MEMORY"] = "1"
+            }
+
+            // Common optimizations (both DXVK and WineD3D)
+            env["WINE_LARGE_ADDRESS_AWARE"] = "1"
+            env["__GL_SHADER_DISK_CACHE_SIZE"] = "268435456"  // 256MB
+            env["__GL_SYNC_TO_VBLANK"] = "0"
+
+            // M2 optimization
             var systemInfo = utsname()
             uname(&systemInfo)
             let machine = withUnsafePointer(to: &systemInfo.machine) {
@@ -281,19 +324,14 @@ class WineManager {
                 }
             }
             if let machine = machine, machine.contains("arm64") {
-                // M2 are 4 P-cores + 4 E-cores
-                // Folosim doar P-cores pentru latenta mica si FPS constant
-                env["WINE_CPU_TOPOLOGY"] = "4:0"  // 4 P-cores pentru performance
+                env["WINE_CPU_TOPOLOGY"] = "4:0"
                 Logger.shared.info("M2 detected - using 4 performance cores")
             }
         } else {
-            // SAFE MODE pentru installere - minimal env vars
-            Logger.shared.info("Running installer in safe mode (no virtual desktop, minimal optimizations)")
+            Logger.shared.info("Running installer in safe mode")
         }
 
-        // macOS specific optimizations (aplicam si pentru installere)
         env["FREETYPE_PROPERTIES"] = "truetype:interpreter-version=35"
-
         process.environment = env
 
         let fileURL = URL(fileURLWithPath: path)
@@ -302,11 +340,16 @@ class WineManager {
 
         process.currentDirectoryURL = workingDir
         process.arguments = [fileName] + args
-
-        // Set high priority pentru mai bun performance
         process.qualityOfService = .userInteractive
 
-        let mode = isInstaller ? "SAFE MODE (Installer)" : "WineD3D+CSMT / XP Mode / Optimized"
+        let mode: String
+        if isInstaller {
+            mode = "SAFE MODE (Installer)"
+        } else if useDXVK {
+            mode = "DXVK (DX9→Vulkan→Metal) / M2 Optimized"
+        } else {
+            mode = "WineD3D (Fallback) / XP Mode"
+        }
         Logger.shared.info("Launching: wine \(fileName) (\(mode))")
 
         let logURL = appSupportURL.appendingPathComponent("logs/wine_game.log")

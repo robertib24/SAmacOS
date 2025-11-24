@@ -2,6 +2,7 @@
 
 # DXVK + MoltenVK Setup Script
 # Installs and configures DXVK for DirectX to Metal translation
+# Optimized for M2 8GB RAM
 
 set -e
 
@@ -10,21 +11,20 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 DXVK_DIR="$PROJECT_ROOT/GameOptimizations/dxvk"
 WINE_ENGINE_DIR="$PROJECT_ROOT/WineEngine"
 
-echo "🎮 Setting up DXVK for SA-MP Runner..."
+echo "🎮 Setting up DXVK for SA-MP Runner (M2 8GB optimized)..."
 
-# DXVK version
-DXVK_VERSION="2.3.1"
-DXVK_ASYNC_VERSION="2.3.1"
+# DXVK version - 2.3 is more stable on macOS
+DXVK_VERSION="2.3"
 
 # Create directories
 mkdir -p "$DXVK_DIR"
 mkdir -p "$WINE_ENGINE_DIR/dlls/x32"
 mkdir -p "$WINE_ENGINE_DIR/dlls/x64"
 
-# Download DXVK async
-echo "📥 Downloading DXVK async v$DXVK_ASYNC_VERSION..."
+# Download DXVK 2.3
+echo "📥 Downloading DXVK v$DXVK_VERSION..."
 
-DXVK_URL="https://github.com/Sporif/dxvk-async/releases/download/$DXVK_ASYNC_VERSION/dxvk-async-$DXVK_ASYNC_VERSION.tar.gz"
+DXVK_URL="https://github.com/doitsujin/dxvk/releases/download/v$DXVK_VERSION/dxvk-$DXVK_VERSION.tar.gz"
 TEMP_DIR=$(mktemp -d)
 
 cd "$TEMP_DIR"
@@ -46,7 +46,7 @@ tar -xzf dxvk.tar.gz
 # Copy DLLs
 echo "📋 Copying DXVK DLLs..."
 
-DXVK_EXTRACTED=$(find . -type d -name "dxvk-async-*" | head -n 1)
+DXVK_EXTRACTED=$(find . -type d -name "dxvk-*" | head -n 1)
 
 if [ -d "$DXVK_EXTRACTED/x32" ]; then
     cp "$DXVK_EXTRACTED/x32"/*.dll "$WINE_ENGINE_DIR/dlls/x32/"
@@ -58,28 +58,27 @@ if [ -d "$DXVK_EXTRACTED/x64" ]; then
     echo "  ✓ x64 DLLs copied"
 fi
 
-# Create DXVK config
-echo "⚙️  Creating DXVK configuration..."
+# Create DXVK config optimized for M2 8GB
+echo "⚙️  Creating DXVK configuration (M2 8GB optimized)..."
 
 cat > "$DXVK_DIR/dxvk.conf" << 'EOF'
 # DXVK Configuration for GTA San Andreas
-# Optimized for macOS + Wine + Metal
+# Optimized for MacBook Pro M2 8GB RAM
 
-# Enable async shader compilation (reduces stuttering)
+# Async shader compilation (reduces stuttering)
 dxvk.enableAsync = True
 
-# Use all available CPU cores for shader compilation
-dxvk.numCompilerThreads = 0
+# Compiler threads - 4 for M2 (4 P-cores)
+dxvk.numCompilerThreads = 4
 
-# Frame latency (lower = less input lag, but may reduce performance)
+# Frame latency - low for less input lag
 dxvk.maxFrameLatency = 1
 
-# Device memory limit (MB) - adjust based on your GPU
-# 4096 MB = 4 GB (good for most Macs)
-# 8192 MB = 8 GB (for high-end Macs)
-dxvk.maxDeviceMemory = 4096
+# Device memory - 2GB for M2 8GB (conservative)
+# M2 8GB: Don't allocate too much or system will swap
+dxvk.maxDeviceMemory = 2048
 
-# Enable graphics pipeline library (faster pipeline creation)
+# Graphics pipeline library
 dxvk.enableGraphicsPipelineLibrary = Auto
 
 # Use raw SSBO for better performance
@@ -88,23 +87,23 @@ dxvk.useRawSsbo = True
 # Enable state cache (saves compiled shaders)
 dxvk.enableStateCache = True
 
-# State cache path will be set by launcher
-# dxvk.enableStateCache = True
-
-# HUD (fps counter, etc.)
-# Set to "fps" for FPS only, "full" for all info, or "0" to disable
-# Launcher will override this based on user preference
-dxvk.hud = fps
+# HUD - disable for performance
+dxvk.hud = 0
 
 # Graphics optimizations
-dxvk.maxChunkSize = 128
+dxvk.maxChunkSize = 64
 
 # macOS specific: reduce overhead
 dxvk.enableOpenVR = False
 dxvk.enableNvapiHack = False
+
+# M2 8GB: Conservative memory management
+d3d9.maxFrameLatency = 1
+d3d9.numBackBuffers = 2
+d3d9.presentInterval = 0
 EOF
 
-echo "  ✓ dxvk.conf created"
+echo "  ✓ dxvk.conf created (M2 optimized)"
 
 # Create MoltenVK config
 echo "⚙️  Creating MoltenVK configuration..."
@@ -177,8 +176,13 @@ echo ""
 echo "Files created:"
 echo "  - $WINE_ENGINE_DIR/dlls/x32/*.dll"
 echo "  - $WINE_ENGINE_DIR/dlls/x64/*.dll"
-echo "  - $DXVK_DIR/dxvk.conf"
+echo "  - $DXVK_DIR/dxvk.conf (M2 8GB optimized)"
 echo "  - $WINE_ENGINE_DIR/install-dxvk-to-prefix.sh"
 echo ""
-echo "Next steps:"
-echo "  Run ./scripts/create-wineprefix.sh to create a Wine prefix with DXVK"
+echo "M2 8GB Optimizations applied:"
+echo "  ✓ VRAM limit: 2GB (prevents swapping)"
+echo "  ✓ Compiler threads: 4 (matches P-cores)"
+echo "  ✓ Frame latency: 1 (low input lag)"
+echo "  ✓ Async shaders: Enabled"
+echo ""
+echo "Next: Launcher will try DXVK first, fallback to WineD3D if fails"
