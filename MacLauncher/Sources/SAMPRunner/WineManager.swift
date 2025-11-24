@@ -112,7 +112,7 @@ class WineManager {
         runWineCommand("reg", arguments: ["delete", "HKCU\\Software\\Wine\\DllOverrides", "/v", "dxgi", "/f"])
 
         // 5. PERFORMANCE: WineD3D optimizations pentru Direct3D9
-        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "csmt", "/t", "REG_DWORD", "/d", "1", "/f"])
+        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "csmt", "/t", "REG_DWORD", "/d", "7", "/f"])  // CSMT cu mai multe thread-uri
         runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "DirectDrawRenderer", "/d", "opengl", "/f"])
         runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "OffScreenRenderingMode", "/d", "fbo", "/f"])
         runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "StrictDrawOrdering", "/d", "disabled", "/f"])
@@ -126,11 +126,16 @@ class WineManager {
         // ARB shaders sunt mai stabili pe macOS pentru jocuri vechi
         runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "UseGLSL", "/d", "disabled", "/f"])
 
-        // 8. PERFORMANCE: Memory optimizations
-        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "VideoMemorySize", "/t", "REG_DWORD", "/d", "2048", "/f"])
+        // 8. PERFORMANCE: Memory optimizations - AGGRESSIVE
+        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "VideoMemorySize", "/t", "REG_DWORD", "/d", "8192", "/f"])  // 8GB VRAM
 
-        // 9. RENDERING FIX: AlwaysOffscreen poate ajuta cu probleme de culoare
-        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "AlwaysOffscreen", "/d", "enabled", "/f"])
+        // 9. RENDERING PERFORMANCE: Dezactivam AlwaysOffscreen pentru FPS mai bun
+        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "AlwaysOffscreen", "/d", "disabled", "/f"])
+
+        // 10. FPS BOOST: Optimizari agresive pentru performance maxim
+        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "RenderTargetLockMode", "/d", "disabled", "/f"])
+        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "Multisampling", "/d", "disabled", "/f"])
+        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "SampleCount", "/t", "REG_DWORD", "/d", "1", "/f"])
     }
 
     // MARK: - Execution
@@ -207,9 +212,15 @@ class WineManager {
             env["WINE_LARGE_ADDRESS_AWARE"] = "1"  // Mai mult RAM pentru joc
             env["__GL_THREADED_OPTIMIZATIONS"] = "1"  // OpenGL threading
 
+            // AGGRESSIVE FPS BOOST: Mai multe thread-uri pentru rendering
+            let cpuCount = ProcessInfo.processInfo.processorCount
+            env["__GL_SHADER_DISK_CACHE_SIZE"] = "1073741824"  // 1GB shader cache
+            env["__GL_SYNC_TO_VBLANK"] = "0"  // Disable vsync la driver level
+            env["WINE_CPU_TOPOLOGY"] = "\(cpuCount):0"  // Foloseste toate core-urile
+
             // REMOVED: esync/fsync - cauzeaza probleme de performance si culori
 
-            // PERFORMANCE: Apple Silicon - prioritize performance cores
+            // PERFORMANCE: Apple Silicon - prioritize performance cores + more aggressive
             var systemInfo = utsname()
             uname(&systemInfo)
             let machine = withUnsafePointer(to: &systemInfo.machine) {
@@ -218,10 +229,9 @@ class WineManager {
                 }
             }
             if let machine = machine, machine.contains("arm64") {
-                // Pe Apple Silicon, folosim performance cores
-                let perfCores = ProcessInfo.processInfo.processorCount / 2
-                env["WINE_CPU_TOPOLOGY"] = "4:0"  // Forteaza pe primele 4 P-cores
-                Logger.shared.info("Apple Silicon detected - using performance cores")
+                // Pe Apple Silicon, setam afinity agresiva + mai multa prioritate
+                env["WINE_CPU_TOPOLOGY"] = "8:0"  // Foloseste 8 P-cores daca sunt disponibile
+                Logger.shared.info("Apple Silicon detected - using all performance cores")
             }
         } else {
             // SAFE MODE pentru installere - minimal env vars

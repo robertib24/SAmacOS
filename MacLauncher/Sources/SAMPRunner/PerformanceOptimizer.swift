@@ -118,8 +118,8 @@ class PerformanceOptimizer {
 
     private func applyLowSettings() {
         let settings = GameSettings(
-            resolution: (1024, 768),  // Reduced pentru mai mult FPS
-            drawDistance: 0.6,  // Mai mica pentru performance
+            resolution: (800, 600),  // Aggressive reduction pentru maxim FPS
+            drawDistance: 0.5,  // Foarte mica pentru performance maxim
             antiAliasing: false,
             visualFX: 0,  // Minim pentru maxim FPS
             frameLimiter: false,
@@ -130,10 +130,10 @@ class PerformanceOptimizer {
 
     private func applyMediumSettings() {
         let settings = GameSettings(
-            resolution: (1280, 720),  // Reduced de la 1920x1080
-            drawDistance: 0.8,  // Reduced pentru performance
+            resolution: (1024, 768),  // Reduced pentru mai mult FPS
+            drawDistance: 0.7,  // Reduced pentru performance
             antiAliasing: false,  // Disabled pentru FPS
-            visualFX: 1,  // Reduced
+            visualFX: 0,  // Minim pentru FPS
             frameLimiter: false,
             vsync: false
         )
