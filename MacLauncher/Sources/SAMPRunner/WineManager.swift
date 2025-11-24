@@ -384,6 +384,11 @@ class WineManager {
                 self.applySafeModeForInstaller()
             }
 
+            // Install DXVK DLLs to Wine prefix if available
+            if !isInstaller {
+                self.installDXVKToPrefix()
+            }
+
             // Detect if DXVK is available
             let useDXVK = self.isDXVKInstalled() && !isInstaller
 
