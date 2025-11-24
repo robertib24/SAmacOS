@@ -132,9 +132,10 @@ class WineManager {
         } else {
             Logger.shared.info("Configuring Wine for WineD3D (fallback mode)")
 
-            // Remove DXVK DLL overrides - use WineD3D
-            runWineCommand("reg", arguments: ["delete", "HKCU\\Software\\Wine\\DllOverrides", "/v", "d3d9", "/f"])
-            runWineCommand("reg", arguments: ["delete", "HKCU\\Software\\Wine\\DllOverrides", "/v", "dxgi", "/f"])
+            // Force builtin WineD3D (not native DXVK DLLs)
+            runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\DllOverrides", "/v", "d3d9", "/d", "builtin", "/f"])
+            runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\DllOverrides", "/v", "dxgi", "/d", "builtin", "/f"])
+            runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\DllOverrides", "/v", "d3d11", "/d", "builtin", "/f"])
 
             // WineD3D optimizations
             runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "DirectDrawRenderer", "/d", "opengl", "/f"])
