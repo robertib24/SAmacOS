@@ -100,11 +100,34 @@ class WineManager {
         }
     }
 
-    /// Check if DXVK is installed
+    /// Check if DXVK is installed AND MoltenVK is available
     private func isDXVKInstalled() -> Bool {
+        // Check 1: DXVK DLLs in Wine prefix
         let system32 = winePrefixURL.appendingPathComponent("drive_c/windows/system32")
         let dxvkDll = system32.appendingPathComponent("d3d9.dll")
-        return FileManager.default.fileExists(atPath: dxvkDll.path)
+
+        guard FileManager.default.fileExists(atPath: dxvkDll.path) else {
+            Logger.shared.info("DXVK not installed - d3d9.dll not found")
+            return false
+        }
+
+        // Check 2: MoltenVK (Vulkan driver for macOS)
+        let moltenVKPaths = [
+            "/usr/local/share/vulkan/icd.d/MoltenVK_icd.json",
+            "/usr/local/lib/libMoltenVK.dylib",
+            "/opt/homebrew/lib/libMoltenVK.dylib"
+        ]
+
+        let moltenVKExists = moltenVKPaths.contains { FileManager.default.fileExists(atPath: $0) }
+
+        if !moltenVKExists {
+            Logger.shared.warning("DXVK DLLs found but MoltenVK not available - falling back to WineD3D")
+            Logger.shared.warning("Install MoltenVK: brew install molten-vk")
+            return false
+        }
+
+        Logger.shared.info("DXVK + MoltenVK detected - ready to use")
+        return true
     }
 
     private func configureWine(useDXVK: Bool = true) {
