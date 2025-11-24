@@ -95,19 +95,25 @@ class PerformanceOptimizer {
         // Cu WineD3D (fara DXVK), performance-ul e mai slab
         // Folosim setari mai conservative pentru playability
 
-        // Apple Silicon M2+ with 16GB+ RAM: High (era Ultra)
+        // Apple Silicon M2+ with 16GB+ RAM: High
         if isAppleSilicon && info.totalRAM >= 16 * 1024 * 1024 * 1024 {
-            return .high  // Reduced de la .ultra
+            return .high
         }
 
-        // Apple Silicon M1 or Intel with decent GPU: Medium (era High)
-        if isAppleSilicon || info.gpuName.contains("Radeon") || info.gpuName.contains("AMD") {
-            return .medium  // Reduced de la .high
+        // Apple Silicon M2/M1 with 8GB RAM: LOW pentru FPS maxim
+        // WineD3D consumption + 8GB limita = trebuie low settings
+        if isAppleSilicon && info.totalRAM < 16 * 1024 * 1024 * 1024 {
+            return .low  // FORCED LOW pentru M2 8GB
         }
 
-        // Intel with integrated GPU: Low (era Medium)
+        // Intel with dedicated GPU: Medium
+        if info.gpuName.contains("Radeon") || info.gpuName.contains("AMD") {
+            return .medium
+        }
+
+        // Intel with integrated GPU: Low
         if info.gpuName.contains("Intel") {
-            return .low  // Reduced de la .medium
+            return .low
         }
 
         // Fallback: Low pentru garantat playable
@@ -118,8 +124,8 @@ class PerformanceOptimizer {
 
     private func applyLowSettings() {
         let settings = GameSettings(
-            resolution: (800, 600),  // Aggressive reduction pentru maxim FPS
-            drawDistance: 0.5,  // Foarte mica pentru performance maxim
+            resolution: (640, 480),  // M2 8GB: minim pentru FPS playable
+            drawDistance: 0.4,  // Foarte mica pentru performance maxim
             antiAliasing: false,
             visualFX: 0,  // Minim pentru maxim FPS
             frameLimiter: false,
