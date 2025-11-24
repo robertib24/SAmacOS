@@ -193,12 +193,30 @@ class WineManager {
     private func installDXVKFromProjectRoot(gameFolder: URL? = nil) -> Bool {
         let fileManager = FileManager.default
         let currentDir = fileManager.currentDirectoryPath
-        let wineEngineDLLs = URL(fileURLWithPath: currentDir)
-            .appendingPathComponent("WineEngine/dlls/x32")
 
-        guard fileManager.fileExists(atPath: wineEngineDLLs.path),
-              let dllFiles = try? fileManager.contentsOfDirectory(atPath: wineEngineDLLs.path) else {
-            Logger.shared.debug("DXVK DLLs not found in project root either")
+        // Log current directory for debugging
+        Logger.shared.debug("Current directory: \(currentDir)")
+
+        // Try multiple paths: current dir, parent dir (for MacLauncher builds)
+        let possiblePaths = [
+            URL(fileURLWithPath: currentDir).appendingPathComponent("WineEngine/dlls/x32"),
+            URL(fileURLWithPath: currentDir).appendingPathComponent("../WineEngine/dlls/x32"),
+        ]
+
+        var wineEngineDLLs: URL?
+        for path in possiblePaths {
+            let normalizedPath = path.standardized
+            Logger.shared.debug("Checking path: \(normalizedPath.path)")
+            if fileManager.fileExists(atPath: normalizedPath.path) {
+                wineEngineDLLs = normalizedPath
+                Logger.shared.debug("✓ Found WineEngine DLLs at: \(normalizedPath.path)")
+                break
+            }
+        }
+
+        guard let dllPath = wineEngineDLLs,
+              let dllFiles = try? fileManager.contentsOfDirectory(atPath: dllPath.path) else {
+            Logger.shared.debug("DXVK DLLs not found in any search path")
             return false
         }
 
@@ -208,7 +226,7 @@ class WineManager {
             return false
         }
 
-        Logger.shared.info("Installing DXVK DLLs from project root...")
+        Logger.shared.info("Installing DXVK DLLs from: \(dllPath.path)")
 
         // 1. Copy to Wine prefix system32
         let system32 = winePrefixURL.appendingPathComponent("drive_c/windows/system32")
@@ -216,7 +234,7 @@ class WineManager {
 
         var installedCount = 0
         for dll in dxvkDlls {
-            let source = wineEngineDLLs.appendingPathComponent(dll)
+            let source = dllPath.appendingPathComponent(dll)
             let dest = system32.appendingPathComponent(dll)
 
             try? fileManager.removeItem(at: dest)
@@ -237,7 +255,7 @@ class WineManager {
         if let gameFolderURL = gameFolder {
             var gameInstalledCount = 0
             for dll in dxvkDlls {
-                let source = wineEngineDLLs.appendingPathComponent(dll)
+                let source = dllPath.appendingPathComponent(dll)
                 let dest = gameFolderURL.appendingPathComponent(dll)
 
                 try? fileManager.removeItem(at: dest)
