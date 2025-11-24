@@ -116,15 +116,21 @@ class WineManager {
         runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "DirectDrawRenderer", "/d", "opengl", "/f"])
         runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "OffScreenRenderingMode", "/d", "fbo", "/f"])
         runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "StrictDrawOrdering", "/d", "disabled", "/f"])
-        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "MaxVersionGL", "/t", "REG_DWORD", "/d", "30002", "/f"])
 
-        // 6. PERFORMANCE: Reduce shader quality pentru FPS mai bun
-        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "UseGLSL", "/d", "enabled", "/f"])
-        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "shader_backend", "/d", "glsl", "/f"])
+        // 6. COLOR FIX: Pixel format si color depth
+        // Fortam 32-bit color pentru a evita probleme cu culorile
+        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "PixelShaderMode", "/d", "enabled", "/f"])
+        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\X11 Driver", "/v", "ScreenDepth", "/t", "REG_DWORD", "/d", "32", "/f"])
 
-        // 7. PERFORMANCE: Memory optimizations
+        // 7. SHADER FIX: Dezactivam GLSL daca cauzeaza probleme cu culorile
+        // ARB shaders sunt mai stabili pe macOS pentru jocuri vechi
+        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "UseGLSL", "/d", "disabled", "/f"])
+
+        // 8. PERFORMANCE: Memory optimizations
         runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "VideoMemorySize", "/t", "REG_DWORD", "/d", "2048", "/f"])
-        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "AlwaysOffscreen", "/d", "disabled", "/f"])
+
+        // 9. RENDERING FIX: AlwaysOffscreen poate ajuta cu probleme de culoare
+        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "AlwaysOffscreen", "/d", "enabled", "/f"])
     }
 
     // MARK: - Execution
@@ -201,9 +207,7 @@ class WineManager {
             env["WINE_LARGE_ADDRESS_AWARE"] = "1"  // Mai mult RAM pentru joc
             env["__GL_THREADED_OPTIMIZATIONS"] = "1"  // OpenGL threading
 
-            // Esync/Fsync pentru latenta mai mica
-            env["WINEESYNC"] = "1"
-            env["WINEFSYNC"] = "1"
+            // REMOVED: esync/fsync - cauzeaza probleme de performance si culori
 
             // PERFORMANCE: Apple Silicon - prioritize performance cores
             var systemInfo = utsname()
