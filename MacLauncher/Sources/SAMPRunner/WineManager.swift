@@ -171,6 +171,74 @@ class WineManager {
         runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Explorer\\Desktops", "/v", "Default", "/d", "1280x720", "/f"])
     }
 
+    /// Aplica low-end performance patch pentru M2 8GB
+    private func applyLowEndPatch(gameDir: URL) {
+        Logger.shared.info("Applying low-end performance patch...")
+
+        // Path to patch script
+        guard let bundlePath = Bundle.main.resourcePath else { return }
+        let patchScript = URL(fileURLWithPath: bundlePath)
+            .appendingPathComponent("GameOptimizations/patches/apply-low-end-settings.sh")
+
+        // Fallback: check in project root
+        let fallbackScript = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent("GameOptimizations/patches/apply-low-end-settings.sh")
+
+        let scriptPath = FileManager.default.fileExists(atPath: patchScript.path) ? patchScript : fallbackScript
+
+        if !FileManager.default.fileExists(atPath: scriptPath.path) {
+            Logger.shared.warning("Low-end patch script not found, applying manual settings...")
+            applyManualLowEndSettings(gameDir: gameDir)
+            return
+        }
+
+        // Run patch script
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.arguments = [scriptPath.path, gameDir.path]
+        try? process.run()
+        process.waitUntilExit()
+
+        if process.terminationStatus == 0 {
+            Logger.shared.info("Low-end patch applied successfully")
+        } else {
+            Logger.shared.warning("Patch script failed, applying manual settings...")
+            applyManualLowEndSettings(gameDir: gameDir)
+        }
+    }
+
+    /// Manual low-end settings (fallback)
+    private func applyManualLowEndSettings(gameDir: URL) {
+        let settingsPath = gameDir.appendingPathComponent("gta_sa.set")
+
+        let lowEndConfig = """
+        [Display]
+        Width=640
+        Height=480
+        Depth=32
+        Windowed=0
+        VSync=0
+        FrameLimiter=0
+
+        [Graphics]
+        VideoMode=1
+        Brightness=0
+        DrawDistance=0.400000
+        AntiAliasing=0
+        VisualFX=0
+        MipMapping=0
+        Shadows=0
+
+        [Audio]
+        SfxVolume=100
+        MusicVolume=50
+        RadioVolume=50
+        """
+
+        try? lowEndConfig.write(to: settingsPath, atomically: true, encoding: .utf8)
+        Logger.shared.info("Manual low-end settings applied")
+    }
+
     func launchGame(executablePath: String, arguments: [String] = [], completion: @escaping (Bool) -> Void) {
         if isRunning { completion(false); return }
 
@@ -183,6 +251,9 @@ class WineManager {
             let isInstaller = self.isInstaller(executablePath)
             if isInstaller {
                 self.applySafeModeForInstaller()
+            } else {
+                // Pentru joc (nu installer), aplicam low-end patch pentru M2 8GB
+                self.applyLowEndPatch(gameDir: gameDir)
             }
 
             let success = self.runWineProcess(path: executablePath, args: arguments, isInstaller: isInstaller)
