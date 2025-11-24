@@ -191,9 +191,6 @@ class InstallationWizardViewController: NSViewController {
             allGood = false
         }
 
-        // Disk space check removed - not required
-        // Users can install with any available space
-
         // Check Metal support
         statusText += "✓ GPU: \(systemInfo.gpuName)\n"
         statusText += "✓ Metal: Supported\n"
@@ -300,7 +297,8 @@ class InstallationWizardViewController: NSViewController {
         contentView.addSubview(progressBar)
 
         // Install SA-MP
-        gameInstaller.installSAMP { progress, message in
+        // FIX: Adăugat parametrul 'version'
+        gameInstaller.installSAMP(version: "0.3.7") { progress, message in
             DispatchQueue.main.async {
                 statusLabel.stringValue = message
                 progressBar.doubleValue = progress

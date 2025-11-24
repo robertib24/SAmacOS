@@ -1,13 +1,11 @@
 import Foundation
 
-/// Manages Wine process lifecycle and configuration
 class WineManager {
     static let shared = WineManager()
 
     private var wineProcess: Process?
     private var isRunning = false
 
-    // Paths
     private let appSupportURL: URL
     private let winePrefixURL: URL
     private let wineExecutableURL: URL
@@ -18,191 +16,141 @@ class WineManager {
             .appendingPathComponent("SA-MP Runner")
         winePrefixURL = appSupportURL.appendingPathComponent("wine")
 
-        // Wine bundled with the app
         if let bundlePath = Bundle.main.resourcePath,
            FileManager.default.fileExists(atPath: bundlePath + "/wine/bin/wine") {
-            wineExecutableURL = URL(fileURLWithPath: bundlePath)
-                .appendingPathComponent("wine/bin/wine")
+            wineExecutableURL = URL(fileURLWithPath: bundlePath).appendingPathComponent("wine/bin/wine")
         } else {
-            // Fallback to system wine - detect based on architecture
-            let possiblePaths = [
-                "/opt/homebrew/bin/wine",    // Apple Silicon (M1/M2/M3)
-                "/usr/local/bin/wine",       // Intel Mac
-                "/Applications/Wine Stable.app/Contents/Resources/wine/bin/wine"  // Wine.app
-            ]
-
-            var foundPath: String?
-            for path in possiblePaths {
-                if FileManager.default.fileExists(atPath: path) {
-                    foundPath = path
-                    break
-                }
-            }
-
+            let possiblePaths = ["/opt/homebrew/bin/wine", "/usr/local/bin/wine", "/Applications/Wine Stable.app/Contents/Resources/wine/bin/wine"]
+            let foundPath = possiblePaths.first { FileManager.default.fileExists(atPath: $0) }
             wineExecutableURL = URL(fileURLWithPath: foundPath ?? "/usr/local/bin/wine")
         }
     }
 
-    // MARK: - Wine Setup
+    // MARK: - Setup Logic
 
     func setupWinePrefix(completion: @escaping (Bool, String?) -> Void) {
-        Logger.shared.info("Setting up Wine prefix at: \(winePrefixURL.path)")
-
+        Logger.shared.info("Setting up Wine prefix...")
         DispatchQueue.global(qos: .userInitiated).async {
-            let success = self.createWinePrefix()
-
-            DispatchQueue.main.async {
-                if success {
-                    self.configureWinePrefix()
-                    completion(true, nil)
-                } else {
-                    completion(false, "Failed to create Wine prefix")
-                }
+            let bootSuccess = self.createWinePrefix()
+            if !bootSuccess {
+                DispatchQueue.main.async { completion(false, "Wine boot failed") }
+                return
             }
+            
+            // Curatam DXVK si configuram Wine standard
+            self.removeDXVK(targetFolder: nil)
+            self.configureWine()
+            
+            DispatchQueue.main.async { completion(true, nil) }
         }
     }
 
     private func createWinePrefix() -> Bool {
         let process = Process()
         process.executableURL = wineExecutableURL
-
-        var environment = ProcessInfo.processInfo.environment
-        environment["WINEPREFIX"] = winePrefixURL.path
-
-        // Don't set WINEARCH on Apple Silicon - Wine 8+ uses wow64 mode automatically
-        // On Intel, we can use win32 for better compatibility
+        process.environment = ["WINEPREFIX": winePrefixURL.path, "WINEDEBUG": "-all"]
+        
         var systemInfo = utsname()
         uname(&systemInfo)
-        let machine = withUnsafePointer(to: &systemInfo.machine) {
-            $0.withMemoryRebound(to: CChar.self, capacity: 1) {
-                String(validatingUTF8: $0)
-            }
+        let machine = withUnsafePointer(to: &systemInfo.machine) { $0.withMemoryRebound(to: CChar.self, capacity: 1) { String(validatingUTF8: $0) } }
+        if let machine = machine, !machine.contains("arm64") {
+             process.environment?["WINEARCH"] = "win32"
         }
-        let isAppleSilicon = machine?.contains("arm64") ?? false
-
-        // Only set WINEARCH on Intel Macs
-        if !isAppleSilicon {
-            environment["WINEARCH"] = "win32"
-        }
-        // On Apple Silicon, Wine will use win64 with wow64 support for 32-bit apps
-
-        environment["WINEDEBUG"] = "-all"  // Suppress debug output for setup
-        process.environment = environment
 
         process.arguments = ["wineboot", "--init"]
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-            return process.terminationStatus == 0
-        } catch {
-            Logger.shared.error("Failed to create Wine prefix: \(error.localizedDescription)")
-            return false
-        }
-    }
-
-    private func configureWinePrefix() {
-        Logger.shared.info("Configuring Wine prefix...")
-
-        // Set registry values for optimal performance
-        setRegistryValue(key: "HKCU\\Software\\Wine\\DirectSound", name: "HelBuflen", value: "512")
-        setRegistryValue(key: "HKCU\\Software\\Wine\\DirectSound", name: "SndQueueMax", value: "3")
-
-        // Configure DLL overrides for DXVK
-        setDLLOverride("d3d9", "native")
-        setDLLOverride("dxgi", "native")
-
-        // Windows version (Windows 10)
-        setRegistryValue(key: "HKCU\\Software\\Wine", name: "Version", value: "win10")
-    }
-
-    private func setRegistryValue(key: String, name: String, value: String) {
-        let process = Process()
-        process.executableURL = wineExecutableURL
-
-        var environment = ProcessInfo.processInfo.environment
-        environment["WINEPREFIX"] = winePrefixURL.path
-        process.environment = environment
-
-        process.arguments = ["reg", "add", key, "/v", name, "/d", value, "/f"]
-
         try? process.run()
         process.waitUntilExit()
+        
+        return process.terminationStatus == 0
     }
 
-    private func setDLLOverride(_ dll: String, _ mode: String) {
-        let key = "HKCU\\Software\\Wine\\DllOverrides"
-        setRegistryValue(key: key, name: dll, value: mode)
-    }
-
-    // MARK: - Game Launch
-
-    func launchGame(executablePath: String, arguments: [String] = [], completion: @escaping (Bool) -> Void) {
-        guard !isRunning else {
-            Logger.shared.warning("Game is already running")
-            completion(false)
-            return
+    private func removeDXVK(targetFolder: URL?) {
+        // Stergem fisierele DXVK care cauzeaza erorile Vulkan
+        // Le stergem atat din System32 cat si din folderul jocului
+        
+        let fileManager = FileManager.default
+        let system32 = winePrefixURL.appendingPathComponent("drive_c/windows/system32")
+        
+        let filesToRemove = ["d3d9.dll", "dxgi.dll", "dxvk.conf"]
+        
+        // 1. Curatare System32
+        for file in filesToRemove {
+            let path = system32.appendingPathComponent(file)
+            if fileManager.fileExists(atPath: path.path) {
+                try? fileManager.removeItem(at: path)
+                Logger.shared.info("Removed \(file) from System32")
+            }
         }
-
-        Logger.shared.info("Launching game: \(executablePath)")
-
-        DispatchQueue.global(qos: .userInitiated).async {
-            let success = self.startWineProcess(executablePath: executablePath, arguments: arguments)
-            DispatchQueue.main.async {
-                completion(success)
+        
+        // 2. Curatare folder joc (daca e specificat)
+        if let target = targetFolder {
+            for file in filesToRemove {
+                let path = target.appendingPathComponent(file)
+                if fileManager.fileExists(atPath: path.path) {
+                    try? fileManager.removeItem(at: path)
+                    Logger.shared.info("Removed \(file) from Game Folder")
+                }
             }
         }
     }
 
-    private func startWineProcess(executablePath: String, arguments: [String]) -> Bool {
+    private func configureWine() {
+        // 1. FIX: Windows XP (Compatibilitate maxima)
+        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine", "/v", "Version", "/d", "winxp", "/f"])
+        
+        // 2. FIX: Virtual Desktop @ 1280x720
+        // Acesta este singurul mod de a evita eroarea "Cannot find 800x600 video mode"
+        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Explorer", "/v", "Desktop", "/d", "Default", "/f"])
+        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Explorer\\Desktops", "/v", "Default", "/d", "1280x720", "/f"])
+        
+        // 3. Audio Fix
+        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\DirectSound", "/v", "HelBuflen", "/d", "512", "/f"])
+        
+        // 4. CLEANUP: Stergem override-urile DXVK din registry
+        // Astfel Wine va folosi "builtin" (WineD3D) in loc de "native" (DXVK)
+        runWineCommand("reg", arguments: ["delete", "HKCU\\Software\\Wine\\DllOverrides", "/v", "d3d9", "/f"])
+        runWineCommand("reg", arguments: ["delete", "HKCU\\Software\\Wine\\DllOverrides", "/v", "dxgi", "/f"])
+    }
+
+    // MARK: - Execution
+
+    func launchGame(executablePath: String, arguments: [String] = [], completion: @escaping (Bool) -> Void) {
+        if isRunning { completion(false); return }
+        
+        DispatchQueue.global(qos: .userInitiated).async {
+            // Asiguram curatarea DXVK inainte de fiecare lansare
+            let gameDir = URL(fileURLWithPath: executablePath).deletingLastPathComponent()
+            self.removeDXVK(targetFolder: gameDir)
+            
+            let success = self.runWineProcess(path: executablePath, args: arguments)
+            DispatchQueue.main.async { completion(success) }
+        }
+    }
+
+    private func runWineProcess(path: String, args: [String]) -> Bool {
         let process = Process()
         process.executableURL = wineExecutableURL
+        
+        var env = ProcessInfo.processInfo.environment
+        env["WINEPREFIX"] = winePrefixURL.path
+        env["WINEDEBUG"] = "-all"
+        // Eliminam variabilele DXVK pentru a fi siguri
+        env.removeValue(forKey: "DXVK_HUD")
+        env.removeValue(forKey: "DXVK_ASYNC")
+        
+        process.environment = env
 
-        // Setup environment variables for optimal performance
-        var environment = ProcessInfo.processInfo.environment
-        environment["WINEPREFIX"] = winePrefixURL.path
+        let fileURL = URL(fileURLWithPath: path)
+        let workingDir = fileURL.deletingLastPathComponent()
+        let fileName = fileURL.lastPathComponent
 
-        // Don't set WINEARCH on Apple Silicon (wow64 handles it automatically)
+        process.currentDirectoryURL = workingDir
+        process.arguments = [fileName] + args
+        
+        Logger.shared.info("Launching: wine \(fileName) (WineD3D / XP Mode)")
 
-        // DXVK settings
-        environment["DXVK_HUD"] = "fps,devinfo,memory"
-        environment["DXVK_ASYNC"] = "1"
-        environment["DXVK_STATE_CACHE_PATH"] = appSupportURL.appendingPathComponent("dxvk_cache").path
-        environment["DXVK_LOG_LEVEL"] = "warn"
-
-        // MoltenVK settings (macOS specific)
-        environment["MVK_CONFIG_LOG_LEVEL"] = "1"  // Errors only
-        environment["MVK_CONFIG_TRACE_VULKAN_CALLS"] = "0"
-        environment["MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS"] = "0"
-        environment["MVK_CONFIG_PREFILL_METAL_COMMAND_BUFFERS"] = "1"
-        environment["MVK_ALLOW_METAL_FENCES"] = "1"
-        environment["MVK_ALLOW_METAL_EVENTS"] = "1"
-
-        // Performance settings
-        environment["STAGING_SHARED_MEMORY"] = "1"
-        environment["WINE_LARGE_ADDRESS_AWARE"] = "1"
-        environment["__GL_THREADED_OPTIMIZATIONS"] = "1"
-
-        // macOS Metal settings
-        environment["MTL_HUD_ENABLED"] = "0"
-        environment["MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS"] = "1"
-
-        process.environment = environment
-
-        // Set working directory to the game folder
-        let gameDirectory = URL(fileURLWithPath: executablePath).deletingLastPathComponent()
-        process.currentDirectoryURL = gameDirectory
-
-        // Run wine with just the executable name (not full path) from the game directory
-        // This avoids issues with spaces in paths
-        let executableName = URL(fileURLWithPath: executablePath).lastPathComponent
-        process.arguments = [executableName] + arguments
-
-        Logger.shared.info("Working directory: \(gameDirectory.path)")
-        Logger.shared.info("Executing: wine \(executableName)")
-
-        // Redirect output to log file
         let logURL = appSupportURL.appendingPathComponent("logs/wine_game.log")
+        try? FileManager.default.createDirectory(at: logURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         if let logFile = try? FileHandle(forWritingTo: logURL) {
             process.standardOutput = logFile
             process.standardError = logFile
@@ -212,142 +160,50 @@ class WineManager {
             try process.run()
             self.wineProcess = process
             self.isRunning = true
-
-            // Monitor process termination
-            process.terminationHandler = { [weak self] _ in
+            process.terminationHandler = { _ in
                 DispatchQueue.main.async {
-                    self?.isRunning = false
-                    Logger.shared.info("Game process terminated")
+                    self.isRunning = false
+                    Logger.shared.info("Process terminated")
                 }
             }
-
             return true
         } catch {
-            Logger.shared.error("Failed to launch game: \(error.localizedDescription)")
+            Logger.shared.error("Run failed: \(error)")
             return false
         }
     }
 
-    // MARK: - Process Management
-
-    func killWine() {
-        guard let process = wineProcess, isRunning else {
-            return
-        }
-
-        Logger.shared.info("Terminating Wine process...")
-        process.terminate()
-
-        // Force kill after 5 seconds if still running
-        DispatchQueue.global().asyncAfter(deadline: .now() + 5) {
-            if self.isRunning {
-                Logger.shared.warning("Force killing Wine process")
-                self.wineProcess?.interrupt()
-            }
-        }
-    }
-
+    func killWine() { wineProcess?.terminate() }
+    
     func shutdown() {
         killWine()
-
-        // Run wineserver --kill to clean up
-        let killProcess = Process()
-        killProcess.executableURL = URL(fileURLWithPath: wineExecutableURL.path
-            .replacingOccurrences(of: "/bin/wine", with: "/bin/wineserver"))
-
-        var environment = ProcessInfo.processInfo.environment
-        environment["WINEPREFIX"] = winePrefixURL.path
-        killProcess.environment = environment
-
-        killProcess.arguments = ["--kill"]
-
-        try? killProcess.run()
-        killProcess.waitUntilExit()
+        let p = Process()
+        p.executableURL = wineExecutableURL
+        p.environment = ["WINEPREFIX": winePrefixURL.path]
+        p.arguments = ["wineserver", "-k"]
+        try? p.run()
+        p.waitUntilExit()
     }
 
     func getStatus() -> WineStatus {
-        return WineStatus(
-            isRunning: isRunning,
-            prefixExists: FileManager.default.fileExists(atPath: winePrefixURL.path),
-            wineVersion: getWineVersion()
-        )
+        return WineStatus(isRunning: isRunning, prefixExists: FileManager.default.fileExists(atPath: winePrefixURL.path), wineVersion: "Unknown")
     }
-
-    private func getWineVersion() -> String {
-        let process = Process()
-        process.executableURL = wineExecutableURL
-        process.arguments = ["--version"]
-
-        let pipe = Pipe()
-        process.standardOutput = pipe
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            if let version = String(data: data, encoding: .utf8) {
-                return version.trimmingCharacters(in: .whitespacesAndNewlines)
-            }
-        } catch {
-            Logger.shared.error("Failed to get Wine version: \(error.localizedDescription)")
-        }
-
-        return "Unknown"
+    
+    @discardableResult
+    func runWineCommand(_ command: String, arguments: [String]) -> Bool {
+        let p = Process()
+        p.executableURL = wineExecutableURL
+        p.environment = ["WINEPREFIX": winePrefixURL.path, "WINEDEBUG": "-all"]
+        p.arguments = [command] + arguments
+        try? p.run()
+        p.waitUntilExit()
+        return p.terminationStatus == 0
     }
-
-    private func convertToWindowsPath(_ macPath: String) -> String {
-        // Convert macOS path to Windows path
-        // /Users/.../wine/drive_c/Program Files/... -> C:\Program Files\...
-        let driveCPrefix = winePrefixURL.path + "/drive_c/"
-
-        if macPath.hasPrefix(driveCPrefix) {
-            // Remove the drive_c prefix and convert to Windows path
-            let relativePath = String(macPath.dropFirst(driveCPrefix.count))
-            let windowsPath = "C:\\" + relativePath.replacingOccurrences(of: "/", with: "\\")
-            Logger.shared.info("Converted path: \(macPath) -> \(windowsPath)")
-            return windowsPath
-        } else {
-            // If path doesn't match expected format, return as-is and log warning
-            Logger.shared.warning("Path doesn't match Wine prefix format: \(macPath)")
-            return macPath
-        }
-    }
-
-    // MARK: - Utilities
-
-    func runWineCommand(_ command: String, arguments: [String] = []) -> Bool {
-        let process = Process()
-        process.executableURL = wineExecutableURL
-
-        var environment = ProcessInfo.processInfo.environment
-        environment["WINEPREFIX"] = winePrefixURL.path
-        process.environment = environment
-
-        process.arguments = [command] + arguments
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-            return process.terminationStatus == 0
-        } catch {
-            return false
-        }
-    }
-
-    // Public getters for Wine paths
-    var winePath: String {
-        return wineExecutableURL.path
-    }
-
-    var winePrefix: String {
-        return winePrefixURL.path
-    }
+    
+    var winePrefix: String { return winePrefixURL.path }
 }
 
-// MARK: - Wine Status
-
-struct WineStatus {
+public struct WineStatus {
     let isRunning: Bool
     let prefixExists: Bool
     let wineVersion: String

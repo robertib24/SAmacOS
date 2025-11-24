@@ -163,6 +163,7 @@ class PerformanceOptimizer {
 
     private func applyGameSettings(_ settings: GameSettings) {
         // Write settings to gta_sa.set file
+        // Aici era eroarea: getGamePath() trebuie sa existe in GameInstaller
         let gtaSAPath = GameInstaller.shared.getGamePath()
         let settingsPath = gtaSAPath.appendingPathComponent("gta_sa.set")
 

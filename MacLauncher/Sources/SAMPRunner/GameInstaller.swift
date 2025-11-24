@@ -1,542 +1,132 @@
 import Foundation
-import Darwin
 
-/// Handles GTA SA and SA-MP installation
 class GameInstaller {
     static let shared = GameInstaller()
-
     private let fileManager = FileManager.default
     private let appSupportURL: URL
     private let gtaSAPath: URL
-    private let sampPath: URL
-
-    // Required GTA SA files for verification
-    private let requiredFiles = [
-        "gta_sa.exe",
-        "models/gta3.img",  // Main game data (not in data/ folder!)
-        "audio/CONFIG/BankLkup.dat"
-    ]
+    
+    private var isInstalling = false
 
     private init() {
         appSupportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
             .appendingPathComponent("SA-MP Runner")
         gtaSAPath = appSupportURL.appendingPathComponent("wine/drive_c/Program Files/Rockstar Games/GTA San Andreas")
-        sampPath = gtaSAPath.appendingPathComponent("samp")
     }
-
-    // MARK: - Installation Status
 
     func isGameInstalled() -> Bool {
-        return verifyGTASAInstallation() && verifySAMPInstallation()
+        return fileManager.fileExists(atPath: gtaSAPath.appendingPathComponent("gta_sa.exe").path) &&
+               fileManager.fileExists(atPath: gtaSAPath.appendingPathComponent("samp.exe").path)
     }
-
+    
     func verifyGTASAInstallation() -> Bool {
-        guard fileManager.fileExists(atPath: gtaSAPath.path) else {
-            Logger.shared.info("GTA SA directory does not exist")
-            return false
-        }
-
-        for file in requiredFiles {
-            let filePath = gtaSAPath.appendingPathComponent(file)
-            if !fileManager.fileExists(atPath: filePath.path) {
-                Logger.shared.warning("Missing required file: \(file)")
-                return false
-            }
-        }
-
-        Logger.shared.info("GTA SA installation verified")
-        return true
+        return fileManager.fileExists(atPath: gtaSAPath.appendingPathComponent("gta_sa.exe").path)
     }
-
-    func verifySAMPInstallation() -> Bool {
-        let sampExe = gtaSAPath.appendingPathComponent("samp.exe")
-        let sampDll = gtaSAPath.appendingPathComponent("samp.dll")
-
-        let exists = fileManager.fileExists(atPath: sampExe.path) &&
-                     fileManager.fileExists(atPath: sampDll.path)
-
-        if exists {
-            Logger.shared.info("SA-MP installation verified")
-        } else {
-            Logger.shared.info("SA-MP not installed")
-        }
-
-        return exists
-    }
-
-    // MARK: - GTA SA Installation
 
     func installGTASA(from sourceURL: URL, progress: @escaping (Double, String) -> Void, completion: @escaping (Bool, String?) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async {
-            Logger.shared.info("Installing GTA SA from: \(sourceURL.path)")
-            progress(0.1, "Creating installation directory...")
-
-            // Create destination directory
+            Logger.shared.info("Installing GTA SA...")
             do {
                 try self.fileManager.createDirectory(at: self.gtaSAPath, withIntermediateDirectories: true)
+                
+                let enumerator = self.fileManager.enumerator(at: sourceURL, includingPropertiesForKeys: nil)
+                while let fileURL = enumerator?.nextObject() as? URL {
+                    let relativePath = fileURL.path.replacingOccurrences(of: sourceURL.path, with: "")
+                    let destURL = self.gtaSAPath.appendingPathComponent(relativePath)
+                    if !relativePath.isEmpty {
+                        try? self.fileManager.createDirectory(at: destURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+                        try? self.fileManager.removeItem(at: destURL)
+                        try self.fileManager.copyItem(at: fileURL, to: destURL)
+                    }
+                }
+                
+                self.applyPatches()
+                DispatchQueue.main.async { completion(true, nil) }
             } catch {
-                DispatchQueue.main.async {
-                    completion(false, "Failed to create installation directory: \(error.localizedDescription)")
-                }
-                return
-            }
-
-            progress(0.2, "Copying game files...")
-
-            // Copy files
-            let success = self.copyDirectory(from: sourceURL, to: self.gtaSAPath) { currentProgress in
-                progress(0.2 + (currentProgress * 0.6), "Copying game files...")
-            }
-
-            if !success {
-                DispatchQueue.main.async {
-                    completion(false, "Failed to copy game files")
-                }
-                return
-            }
-
-            progress(0.8, "Verifying installation...")
-
-            // Verify installation
-            let verified = self.verifyGTASAInstallation()
-
-            if verified {
-                progress(0.9, "Applying compatibility patches...")
-                self.applyGTASAPatches()
-
-                progress(1.0, "Installation complete!")
-
-                DispatchQueue.main.async {
-                    completion(true, nil)
-                }
-            } else {
-                DispatchQueue.main.async {
-                    completion(false, "Installation verification failed")
-                }
+                DispatchQueue.main.async { completion(false, error.localizedDescription) }
             }
         }
     }
 
-    private func copyDirectory(from source: URL, to destination: URL, progress: @escaping (Double) -> Void) -> Bool {
-        do {
-            // Get total size for progress calculation
-            let enumerator = fileManager.enumerator(at: source, includingPropertiesForKeys: [.fileSizeKey])
-            var totalSize: Int64 = 0
-            var files: [(URL, Int64)] = []
-
-            while let fileURL = enumerator?.nextObject() as? URL {
-                if let size = try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize {
-                    totalSize += Int64(size)
-                    files.append((fileURL, Int64(size)))
-                }
-            }
-
-            var copiedSize: Int64 = 0
-
-            // Copy files
-            for (fileURL, size) in files {
-                let relativePath = fileURL.path.replacingOccurrences(of: source.path, with: "")
-                let destURL = destination.appendingPathComponent(relativePath)
-
-                // Create parent directory if needed
-                let parentDir = destURL.deletingLastPathComponent()
-                if !fileManager.fileExists(atPath: parentDir.path) {
-                    try fileManager.createDirectory(at: parentDir, withIntermediateDirectories: true)
-                }
-
-                // Remove existing file if present (for re-installation)
-                if fileManager.fileExists(atPath: destURL.path) {
-                    try? fileManager.removeItem(at: destURL)
-                }
-
-                // Copy file
-                try fileManager.copyItem(at: fileURL, to: destURL)
-
-                copiedSize += size
-                progress(Double(copiedSize) / Double(totalSize))
-            }
-
-            return true
-        } catch {
-            Logger.shared.error("Copy failed: \(error.localizedDescription)")
-            return false
-        }
-    }
-
-    private func applyGTASAPatches() {
-        Logger.shared.info("Applying GTA SA compatibility patches...")
-
-        // Create optimized gta_sa.set (settings file)
-        createOptimizedSettings()
-
-        // Apply no-CD patch if needed
-        // (Not implemented - users must have legitimate copy)
-
-        // Set file permissions
-        setFilePermissions()
-    }
-
-    private func createOptimizedSettings() {
-        // GTA SA settings optimized for macOS + Wine
-        let settings = """
-        [Display]
-        Width=1920
-        Height=1080
-        Depth=32
-        Windowed=0
-        VSync=0
-        FrameLimiter=0
-
-        [Graphics]
-        VideoMode=1
-        Brightness=0
-        DrawDistance=1.2
-        AntiAliasing=1
-        VisualFX=2
-        MipMapping=1
-
-        [Audio]
-        SfxVolume=100
-        MusicVolume=80
-        RadioVolume=80
-        RadioEQ=0
-
-        [Controller]
-        Method=0
-
-        [Game]
-        Language=english
-        """
-
-        let settingsPath = gtaSAPath.appendingPathComponent("gta_sa.set")
-        try? settings.write(to: settingsPath, atomically: true, encoding: .utf8)
-    }
-
-    private func setFilePermissions() {
-        // Make executables... executable
-        let executables = ["gta_sa.exe", "samp.exe"]
-        for exe in executables {
-            let path = gtaSAPath.appendingPathComponent(exe)
-            if fileManager.fileExists(atPath: path.path) {
-                try? fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path.path)
-            }
-        }
-    }
-
-    // MARK: - SA-MP Installation
-
-    func installSAMP(version: String = "0.3.7", progress: @escaping (Double, String) -> Void, completion: @escaping (Bool, String?) -> Void) {
+    func installSAMP(version: String, progress: @escaping (Double, String) -> Void, completion: @escaping (Bool, String?) -> Void) {
+        if isInstalling { return }
+        isInstalling = true
+        
         DispatchQueue.global(qos: .userInitiated).async {
-            Logger.shared.info("Installing SA-MP version: \(version)")
-            progress(0.1, "Preparing SA-MP installation...")
-
-            // Instead of downloading and running installer, download files directly
-            // This is more reliable than trying to run Windows installer through Wine
-            let success = self.downloadAndInstallSAMPFiles(version: version, progress: progress)
-
-            if success {
-                progress(0.9, "Configuring SA-MP...")
-                self.configureSAMP()
-
-                progress(1.0, "SA-MP installation complete!")
-
-                DispatchQueue.main.async {
-                    completion(true, nil)
+            let urlString = "https://gta-multiplayer.cz/downloads/sa-mp-0.3.7-R5-2-MP-install.exe"
+            guard let url = URL(string: urlString) else { return }
+            
+            let tempDir = self.appSupportURL.appendingPathComponent("temp")
+            try? self.fileManager.createDirectory(at: tempDir, withIntermediateDirectories: true)
+            
+            let installerPath = tempDir.appendingPathComponent("samp_install.exe")
+            try? self.fileManager.removeItem(at: installerPath)
+            
+            progress(0.2, "Downloading Installer...")
+            
+            let semaphore = DispatchSemaphore(value: 0)
+            var downloadError: Error?
+            
+            let task = URLSession.shared.downloadTask(with: url) { localURL, _, error in
+                if let error = error { downloadError = error }
+                else if let localURL = localURL {
+                    do {
+                        try self.fileManager.moveItem(at: localURL, to: installerPath)
+                        let size = (try? self.fileManager.attributesOfItem(atPath: installerPath.path)[.size] as? UInt64) ?? 0
+                        if size < 2000000 { throw NSError(domain: "", code: 1, userInfo: [NSLocalizedDescriptionKey: "File too small"]) }
+                    } catch { downloadError = error }
                 }
-            } else {
-                DispatchQueue.main.async {
-                    completion(false, "Failed to install SA-MP files")
-                }
+                semaphore.signal()
             }
-        }
-    }
-
-    private func downloadAndInstallSAMPFiles(version: String, progress: @escaping (Double, String) -> Void) -> Bool {
-        Logger.shared.info("Installing SA-MP files for version: \(version)")
-
-        // SA-MP file URLs - using alternative mirrors since official site may be unreliable
-        // samp.saa is optional (audio archive)
-        let sampFiles: [(String, String, Bool)] = [
-            ("samp.exe", "https://github.com/dashr9230/SA-MP/releases/download/v0.3.7-R2/samp.exe", true),
-            ("samp.dll", "https://github.com/dashr9230/SA-MP/releases/download/v0.3.7-R2/samp.dll", true),
-            ("samp.saa", "https://github.com/dashr9230/SA-MP/releases/download/v0.3.7-R2/samp.saa", false)
-        ]
-
-        progress(0.2, "Downloading SA-MP files...")
-
-        var downloadedFiles: [(String, URL)] = []
-        let downloadGroup = DispatchGroup()
-        var criticalDownloadFailed = false
-
-        // Download each file
-        for (filename, urlString, required) in sampFiles {
-            guard let url = URL(string: urlString) else {
-                Logger.shared.error("Invalid URL for \(filename)")
-                if required {
-                    criticalDownloadFailed = true
-                }
-                continue
-            }
-
-            downloadGroup.enter()
-
-            let task = URLSession.shared.downloadTask(with: url) { localURL, response, error in
-                defer { downloadGroup.leave() }
-
-                if let error = error {
-                    Logger.shared.error("Failed to download \(filename): \(error.localizedDescription)")
-                    if required {
-                        criticalDownloadFailed = true
-                    } else {
-                        Logger.shared.warning("\(filename) is optional, continuing without it")
-                    }
-                    return
-                }
-
-                guard let localURL = localURL else {
-                    Logger.shared.error("No local URL for \(filename)")
-                    if required {
-                        criticalDownloadFailed = true
-                    }
-                    return
-                }
-
-                // Save to temp location
-                let tempURL = self.appSupportURL.appendingPathComponent("temp/\(filename)")
-                try? self.fileManager.createDirectory(at: tempURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-                try? self.fileManager.removeItem(at: tempURL)
-
-                do {
-                    try self.fileManager.moveItem(at: localURL, to: tempURL)
-                    downloadedFiles.append((filename, tempURL))
-                    Logger.shared.info("Downloaded \(filename)")
-                } catch {
-                    Logger.shared.error("Failed to save \(filename): \(error.localizedDescription)")
-                    if required {
-                        criticalDownloadFailed = true
-                    }
-                }
-            }
-
             task.resume()
-        }
-
-        // Wait for all downloads to complete
-        downloadGroup.wait()
-
-        // Check if critical files were downloaded (samp.exe and samp.dll)
-        let hasRequiredFiles = downloadedFiles.contains { $0.0 == "samp.exe" } &&
-                               downloadedFiles.contains { $0.0 == "samp.dll" }
-
-        if criticalDownloadFailed || !hasRequiredFiles {
-            Logger.shared.error("Failed to download required SA-MP files")
-            return false
-        }
-
-        Logger.shared.info("Downloaded \(downloadedFiles.count) SA-MP file(s)")
-
-        progress(0.6, "Installing SA-MP files...")
-
-        // Copy files to GTA SA directory
-        for (filename, tempURL) in downloadedFiles {
-            // Verify file exists before copying
-            guard fileManager.fileExists(atPath: tempURL.path) else {
-                Logger.shared.warning("Temp file not found for \(filename), skipping")
-                continue
-            }
-
-            let destURL = gtaSAPath.appendingPathComponent(filename)
-
-            do {
-                // Remove existing file if present
-                try? fileManager.removeItem(at: destURL)
-
-                // Copy file
-                try fileManager.copyItem(at: tempURL, to: destURL)
-
-                // Make executable
-                if filename.hasSuffix(".exe") {
-                    try? fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: destURL.path)
-                }
-
-                Logger.shared.info("Installed \(filename)")
-
-                // Clean up temp file
-                try? fileManager.removeItem(at: tempURL)
-            } catch {
-                Logger.shared.error("Failed to install \(filename): \(error.localizedDescription)")
-                // Only fail if it's a critical file
-                if filename == "samp.exe" || filename == "samp.dll" {
-                    return false
-                } else {
-                    Logger.shared.warning("Continuing installation without \(filename)")
-                }
-            }
-        }
-
-        Logger.shared.info("SA-MP files installed successfully")
-        return true
-    }
-
-    private func getSAMPDownloadURL(version: String) -> URL {
-        // SA-MP official download URLs
-        // Note: This is a placeholder - actual implementation would need to handle different versions
-        return URL(string: "https://sa-mp.mp/files/SA-MP-\(version)-install.exe")!
-    }
-
-    private func downloadFile(from url: URL, completion: @escaping (URL?) -> Void) {
-        let task = URLSession.shared.downloadTask(with: url) { localURL, response, error in
-            if let error = error {
-                Logger.shared.error("Download failed: \(error.localizedDescription)")
-                completion(nil)
+            semaphore.wait()
+            
+            if let error = downloadError {
+                self.isInstalling = false
+                DispatchQueue.main.async { completion(false, error.localizedDescription) }
                 return
             }
-
-            guard let localURL = localURL else {
-                completion(nil)
-                return
+            
+            progress(0.5, "Running Installer...")
+            
+            let group = DispatchGroup()
+            group.enter()
+            
+            WineManager.shared.launchGame(executablePath: installerPath.path) { _ in
+                group.leave()
             }
-
-            // Move to temporary location
-            let tempURL = self.appSupportURL.appendingPathComponent("temp/samp_installer.exe")
-            try? self.fileManager.createDirectory(at: tempURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-
-            try? self.fileManager.removeItem(at: tempURL)
-            try? self.fileManager.moveItem(at: localURL, to: tempURL)
-
-            completion(tempURL)
-        }
-
-        task.resume()
-    }
-
-    private func extractAndInstallSAMP(from installerURL: URL) -> Bool {
-        Logger.shared.info("Installing SA-MP from: \(installerURL.path)")
-
-        // Run SA-MP installer using Wine in silent mode
-        let wineManager = WineManager.shared
-
-        // Use 'wine start /unix' to handle Unix paths with spaces correctly
-        Logger.shared.info("Running SA-MP installer: wine start /unix \(installerURL.path) /S")
-
-        // Execute installer via Wine using 'start /unix' for Unix path support
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: wineManager.winePath)
-        process.arguments = ["start", "/unix", installerURL.path, "/S"]
-
-        var environment = ProcessInfo.processInfo.environment
-        environment["WINEPREFIX"] = wineManager.winePrefix
-        environment["WINEDEBUG"] = "-all" // Suppress Wine debug messages
-
-        // Check architecture for WINEARCH
-        var systemInfo = Darwin.utsname()
-        Darwin.uname(&systemInfo)
-        let machine = withUnsafePointer(to: &systemInfo.machine) {
-            $0.withMemoryRebound(to: CChar.self, capacity: 1) {
-                String(validatingUTF8: $0)
-            }
-        }
-        let isAppleSilicon = machine?.contains("arm64") ?? false
-        if !isAppleSilicon {
-            environment["WINEARCH"] = "win32"
-        }
-
-        process.environment = environment
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-
-            // Give installer time to complete (start launches async)
-            sleep(3)
-
-            if process.terminationStatus == 0 {
-                Logger.shared.info("SA-MP installer launched successfully")
-
-                // Verify installation
-                let sampExe = gtaSAPath.appendingPathComponent("samp.exe")
-                if fileManager.fileExists(atPath: sampExe.path) {
-                    Logger.shared.info("SA-MP installation verified")
-                    return true
-                } else {
-                    Logger.shared.warning("SA-MP installer ran but files not found")
-                    return false
+            
+            var attempts = 0
+            while attempts < 180 {
+                sleep(1)
+                if self.fileManager.fileExists(atPath: self.gtaSAPath.appendingPathComponent("samp.exe").path) {
+                    break
                 }
-            } else {
-                Logger.shared.error("SA-MP installer failed with status: \(process.terminationStatus)")
-                return false
+                attempts += 1
             }
-        } catch {
-            Logger.shared.error("Failed to run SA-MP installer: \(error.localizedDescription)")
-            return false
+            
+            self.isInstalling = false
+            self.configureSAMP()
+            self.applyPatches()
+            
+            DispatchQueue.main.async { completion(true, nil) }
         }
     }
-
+    
+    private func applyPatches() {
+        // FIX: Doar ștergem gta_sa.set pentru a lăsa jocul să-și creeze unul nou curat
+        // pentru Windows XP environment.
+        let settingsPath = gtaSAPath.appendingPathComponent("gta_sa.set")
+        try? fileManager.removeItem(at: settingsPath)
+    }
+    
     private func configureSAMP() {
-        Logger.shared.info("Configuring SA-MP...")
-
-        // Create SA-MP userdata directory
-        let sampUserData = gtaSAPath.appendingPathComponent("SAMP")
-        try? fileManager.createDirectory(at: sampUserData, withIntermediateDirectories: true)
-
-        // Create default sa-mp.cfg
-        let config = """
-        [samp]
-        pagesize=10
-        gamma=1.0
-        fontface=Arial
-        fontweight=0
-        timestamp=1
-        """
-
-        let configPath = sampUserData.appendingPathComponent("sa-mp.cfg")
-        try? config.write(to: configPath, atomically: true, encoding: .utf8)
+        let config = "[samp]\npagesize=10\ngamma=1.0\nfontface=Arial\nfontweight=0\ntimestamp=1"
+        try? config.write(to: gtaSAPath.appendingPathComponent("SAMP/sa-mp.cfg"), atomically: true, encoding: .utf8)
     }
-
-    // MARK: - Utilities
-
-    func getGamePath() -> URL {
-        return gtaSAPath
-    }
-
-    func getSAMPExecutablePath() -> String {
-        return gtaSAPath.appendingPathComponent("samp.exe").path
-    }
-
-    func getGTASAExecutablePath() -> String {
-        return gtaSAPath.appendingPathComponent("gta_sa.exe").path
-    }
-
-    func getInstallationSize() -> Int64 {
-        guard let enumerator = fileManager.enumerator(at: gtaSAPath, includingPropertiesForKeys: [.fileSizeKey]) else {
-            return 0
-        }
-
-        var totalSize: Int64 = 0
-        while let fileURL = enumerator.nextObject() as? URL {
-            if let size = try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize {
-                totalSize += Int64(size)
-            }
-        }
-
-        return totalSize
-    }
-
-    func uninstall(completion: @escaping (Bool) -> Void) {
-        DispatchQueue.global(qos: .userInitiated).async {
-            Logger.shared.info("Uninstalling game...")
-
-            do {
-                try self.fileManager.removeItem(at: self.gtaSAPath)
-                DispatchQueue.main.async {
-                    completion(true)
-                }
-            } catch {
-                Logger.shared.error("Uninstall failed: \(error.localizedDescription)")
-                DispatchQueue.main.async {
-                    completion(false)
-                }
-            }
-        }
-    }
+    
+    func getGamePath() -> URL { return gtaSAPath }
+    func getSAMPExecutablePath() -> String { return gtaSAPath.appendingPathComponent("samp.exe").path }
+    func getGTASAExecutablePath() -> String { return gtaSAPath.appendingPathComponent("gta_sa.exe").path }
+    func verifySAMPInstallation() -> Bool { return isGameInstalled() }
 }
