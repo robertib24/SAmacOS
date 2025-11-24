@@ -37,18 +37,10 @@ class WineManager {
                 return
             }
 
-            // Install DXVK to Wine prefix if available in WineEngine
-            let dxvkInstalled = self.installDXVKToPrefix()
+            // Configure Wine for WineD3D (OpenGL) - NO DXVK on Apple Silicon
+            self.configureWineD3D()
 
-            // Configure Wine - try DXVK first if available
-            let useDXVK = dxvkInstalled && self.isDXVKInstalled()
-            self.configureWine(useDXVK: useDXVK)
-
-            if useDXVK {
-                Logger.shared.info("Wine prefix configured with DXVK")
-            } else {
-                Logger.shared.info("Wine prefix configured with WineD3D (DXVK not found)")
-            }
+            Logger.shared.info("Wine prefix configured with WineD3D (Apple Silicon compatible)")
 
             DispatchQueue.main.async { completion(true, nil) }
         }
@@ -59,13 +51,6 @@ class WineManager {
         process.executableURL = wineExecutableURL
         process.environment = ["WINEPREFIX": winePrefixURL.path, "WINEDEBUG": "-all"]
         
-        var systemInfo = utsname()
-        uname(&systemInfo)
-        let machine = withUnsafePointer(to: &systemInfo.machine) { $0.withMemoryRebound(to: CChar.self, capacity: 1) { String(validatingUTF8: $0) } }
-        if let machine = machine, !machine.contains("arm64") {
-             process.environment?["WINEARCH"] = "win32"
-        }
-
         process.arguments = ["wineboot", "--init"]
         try? process.run()
         process.waitUntilExit()
@@ -73,404 +58,100 @@ class WineManager {
         return process.terminationStatus == 0
     }
 
-    private func removeDXVK(targetFolder: URL?) {
-        // Stergem fisierele DXVK care cauzeaza erorile Vulkan
-        // Le stergem atat din System32 cat si din folderul jocului
-        
+    /// Remove DXVK DLLs ONLY from game folder - NOT from System32!
+    /// System32 needs d3d9.dll for WineD3D to work!
+    private func cleanGameFolderDXVK(gameFolder: URL) {
         let fileManager = FileManager.default
-        let system32 = winePrefixURL.appendingPathComponent("drive_c/windows/system32")
         
-        let filesToRemove = ["d3d9.dll", "dxgi.dll", "dxvk.conf"]
+        // ONLY remove from game folder - these override System32
+        let dxvkFiles = ["d3d9.dll", "dxgi.dll", "d3d11.dll", "d3d10.dll", "d3d10core.dll", "dxvk.conf"]
         
-        // 1. Curatare System32
-        for file in filesToRemove {
-            let path = system32.appendingPathComponent(file)
+        for file in dxvkFiles {
+            let path = gameFolder.appendingPathComponent(file)
             if fileManager.fileExists(atPath: path.path) {
                 try? fileManager.removeItem(at: path)
-                Logger.shared.info("Removed \(file) from System32")
+                Logger.shared.info("Removed DXVK override: \(file) from Game Folder")
             }
         }
         
-        // 2. Curatare folder joc (daca e specificat)
-        if let target = targetFolder {
-            for file in filesToRemove {
-                let path = target.appendingPathComponent(file)
-                if fileManager.fileExists(atPath: path.path) {
-                    try? fileManager.removeItem(at: path)
-                    Logger.shared.info("Removed \(file) from Game Folder")
-                }
-            }
-        }
+        // DO NOT touch System32! WineD3D needs those DLLs!
     }
 
-    /// Install DXVK DLLs from WineEngine to Wine prefix AND game folder
-    /// Returns: true if DXVK DLLs were installed, false if not available
-    private func installDXVKToPrefix(gameFolder: URL? = nil) -> Bool {
-        let fileManager = FileManager.default
+    /// Configure Wine to use WineD3D (OpenGL) instead of DXVK
+    private func configureWineD3D() {
+        Logger.shared.info("Configuring WineD3D (OpenGL) for Apple Silicon...")
 
-        // Check if DXVK DLLs are available in WineEngine
-        guard let bundlePath = Bundle.main.resourcePath else {
-            Logger.shared.debug("Bundle path not found, checking project root...")
-            return installDXVKFromProjectRoot(gameFolder: gameFolder)
-        }
+        // 1. Windows 7 for better DirectX 9 support
+        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine", "/v", "Version", "/d", "win7", "/f"])
 
-        let wineEngineDLLs = URL(fileURLWithPath: bundlePath)
-            .appendingPathComponent("WineEngine/dlls/x32")
-
-        // Fallback: check in project root
-        if !fileManager.fileExists(atPath: wineEngineDLLs.path) {
-            Logger.shared.debug("WineEngine DLLs not in bundle, checking project root...")
-            return installDXVKFromProjectRoot(gameFolder: gameFolder)
-        }
-
-        // Get DXVK DLLs
-        guard let dllFiles = try? fileManager.contentsOfDirectory(atPath: wineEngineDLLs.path) else {
-            Logger.shared.debug("No DXVK DLLs found in WineEngine")
-            return false
-        }
-
-        let dxvkDlls = dllFiles.filter { $0.hasSuffix(".dll") }
-
-        if dxvkDlls.isEmpty {
-            Logger.shared.debug("No DXVK DLLs found to install")
-            return false
-        }
-
-        Logger.shared.info("Installing DXVK DLLs to Wine prefix and game folder...")
-
-        // 1. Copy to Wine prefix system32
-        let system32 = winePrefixURL.appendingPathComponent("drive_c/windows/system32")
-        try? fileManager.createDirectory(at: system32, withIntermediateDirectories: true)
-
-        var installedCount = 0
-        for dll in dxvkDlls {
-            let source = wineEngineDLLs.appendingPathComponent(dll)
-            let dest = system32.appendingPathComponent(dll)
-
-            try? fileManager.removeItem(at: dest)
-
-            do {
-                try fileManager.copyItem(at: source, to: dest)
-                installedCount += 1
-                Logger.shared.debug("Installed \(dll) to system32")
-            } catch {
-                Logger.shared.warning("Failed to install \(dll) to system32: \(error.localizedDescription)")
-            }
-        }
-
-        if installedCount > 0 {
-            Logger.shared.info("✓ Installed \(installedCount) DXVK DLLs to Wine prefix")
-        }
-
-        // 2. Copy to game folder (Wine checks game folder first!)
-        if let gameFolderURL = gameFolder {
-            var gameInstalledCount = 0
-            for dll in dxvkDlls {
-                let source = wineEngineDLLs.appendingPathComponent(dll)
-                let dest = gameFolderURL.appendingPathComponent(dll)
-
-                try? fileManager.removeItem(at: dest)
-
-                do {
-                    try fileManager.copyItem(at: source, to: dest)
-                    gameInstalledCount += 1
-                    Logger.shared.debug("Installed \(dll) to game folder")
-                } catch {
-                    Logger.shared.warning("Failed to install \(dll) to game folder: \(error.localizedDescription)")
-                }
-            }
-
-            if gameInstalledCount > 0 {
-                Logger.shared.info("✓ Installed \(gameInstalledCount) DXVK DLLs to game folder")
-            }
-        }
-
-        return installedCount > 0
-    }
-
-    /// Install DXVK from project root (fallback for development builds)
-    /// Returns: true if DXVK DLLs were installed, false if not available
-    private func installDXVKFromProjectRoot(gameFolder: URL? = nil) -> Bool {
-        let fileManager = FileManager.default
-        let currentDir = fileManager.currentDirectoryPath
-
-        // Log current directory for debugging
-        Logger.shared.debug("Current directory: \(currentDir)")
-
-        // Try multiple paths: current dir, parent dir (for MacLauncher builds)
-        let possiblePaths = [
-            URL(fileURLWithPath: currentDir).appendingPathComponent("WineEngine/dlls/x32"),
-            URL(fileURLWithPath: currentDir).appendingPathComponent("../WineEngine/dlls/x32"),
-        ]
-
-        var wineEngineDLLs: URL?
-        for path in possiblePaths {
-            let normalizedPath = path.standardized
-            Logger.shared.debug("Checking path: \(normalizedPath.path)")
-            if fileManager.fileExists(atPath: normalizedPath.path) {
-                wineEngineDLLs = normalizedPath
-                Logger.shared.debug("✓ Found WineEngine DLLs at: \(normalizedPath.path)")
-                break
-            }
-        }
-
-        guard let dllPath = wineEngineDLLs,
-              let dllFiles = try? fileManager.contentsOfDirectory(atPath: dllPath.path) else {
-            Logger.shared.debug("DXVK DLLs not found in any search path")
-            return false
-        }
-
-        let dxvkDlls = dllFiles.filter { $0.hasSuffix(".dll") }
-
-        if dxvkDlls.isEmpty {
-            return false
-        }
-
-        Logger.shared.info("Installing DXVK DLLs from: \(dllPath.path)")
-
-        // 1. Copy to Wine prefix system32
-        let system32 = winePrefixURL.appendingPathComponent("drive_c/windows/system32")
-        try? fileManager.createDirectory(at: system32, withIntermediateDirectories: true)
-
-        var installedCount = 0
-        for dll in dxvkDlls {
-            let source = dllPath.appendingPathComponent(dll)
-            let dest = system32.appendingPathComponent(dll)
-
-            try? fileManager.removeItem(at: dest)
-
-            do {
-                try fileManager.copyItem(at: source, to: dest)
-                installedCount += 1
-            } catch {
-                Logger.shared.warning("Failed to install \(dll): \(error.localizedDescription)")
-            }
-        }
-
-        if installedCount > 0 {
-            Logger.shared.info("✓ Installed \(installedCount) DXVK DLLs from project root")
-        }
-
-        // 2. Copy to game folder (Wine checks game folder first!)
-        if let gameFolderURL = gameFolder {
-            var gameInstalledCount = 0
-            for dll in dxvkDlls {
-                let source = dllPath.appendingPathComponent(dll)
-                let dest = gameFolderURL.appendingPathComponent(dll)
-
-                try? fileManager.removeItem(at: dest)
-
-                do {
-                    try fileManager.copyItem(at: source, to: dest)
-                    gameInstalledCount += 1
-                } catch {
-                    Logger.shared.warning("Failed to install \(dll) to game folder: \(error.localizedDescription)")
-                }
-            }
-
-            if gameInstalledCount > 0 {
-                Logger.shared.info("✓ Installed \(gameInstalledCount) DXVK DLLs to game folder (project root)")
-            }
-        }
-
-        return installedCount > 0
-    }
-
-    /// Check if DXVK is installed AND MoltenVK is available
-    private func isDXVKInstalled() -> Bool {
-        // Check 1: DXVK DLLs in Wine prefix
-        let system32 = winePrefixURL.appendingPathComponent("drive_c/windows/system32")
-        let dxvkDll = system32.appendingPathComponent("d3d9.dll")
-
-        guard FileManager.default.fileExists(atPath: dxvkDll.path) else {
-            Logger.shared.info("DXVK not installed - d3d9.dll not found")
-            return false
-        }
-
-        // Check 2: MoltenVK (Vulkan driver for macOS)
-        let moltenVKPaths = [
-            "/usr/local/share/vulkan/icd.d/MoltenVK_icd.json",
-            "/usr/local/lib/libMoltenVK.dylib",
-            "/opt/homebrew/lib/libMoltenVK.dylib"
-        ]
-
-        let moltenVKExists = moltenVKPaths.contains { FileManager.default.fileExists(atPath: $0) }
-
-        if !moltenVKExists {
-            Logger.shared.warning("DXVK DLLs found but MoltenVK not available - falling back to WineD3D")
-            Logger.shared.warning("Install MoltenVK: brew install molten-vk")
-            return false
-        }
-
-        Logger.shared.info("DXVK + MoltenVK detected - ready to use")
-        return true
-    }
-
-    private func configureWine(useDXVK: Bool = true) {
-        // 1. FIX: Windows XP (Compatibilitate maxima)
-        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine", "/v", "Version", "/d", "winxp", "/f"])
-
-        // 2. FIX: Virtual Desktop @ 1280x720
+        // 2. Virtual Desktop
         runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Explorer", "/v", "Desktop", "/d", "Default", "/f"])
         runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Explorer\\Desktops", "/v", "Default", "/d", "1280x720", "/f"])
 
-        // 3. Audio Fix
+        // 3. Audio settings
         runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\DirectSound", "/v", "HelBuflen", "/d", "512", "/f"])
+        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\DirectSound", "/v", "SndQueueMax", "/d", "3", "/f"])
 
-        // 4. DXVK vs WineD3D configuration
-        if useDXVK && isDXVKInstalled() {
-            Logger.shared.info("Configuring Wine for DXVK (DirectX → Vulkan → Metal)")
+        // 4. FORCE BUILTIN d3d9.dll (WineD3D) - THIS IS CRITICAL!
+        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\DllOverrides", "/v", "d3d9", "/d", "builtin", "/f"])
+        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\DllOverrides", "/v", "ddraw", "/d", "builtin", "/f"])
+        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\DllOverrides", "/v", "d3d8", "/d", "builtin", "/f"])
+        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\DllOverrides", "/v", "d3d11", "/d", "builtin", "/f"])
+        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\DllOverrides", "/v", "dxgi", "/d", "builtin", "/f"])
 
-            // Enable DXVK DLL overrides
-            runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\DllOverrides", "/v", "d3d9", "/d", "native", "/f"])
-            runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\DllOverrides", "/v", "dxgi", "/d", "native", "/f"])
+        // 5. WineD3D OpenGL settings
+        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "DirectDrawRenderer", "/d", "opengl", "/f"])
+        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "OffScreenRenderingMode", "/d", "fbo", "/f"])
+        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "PixelShaderMode", "/d", "enabled", "/f"])
+        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "VertexShaderMode", "/d", "hardware", "/f"])
+        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "UseGLSL", "/d", "enabled", "/f"])
+        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "VideoMemorySize", "/d", "2048", "/f"])
+        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "csmt", "/t", "REG_DWORD", "/d", "3", "/f"])
 
-            // DXVK-specific registry settings
-            runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "PixelShaderMode", "/d", "enabled", "/f"])
-            runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\X11 Driver", "/v", "ScreenDepth", "/t", "REG_DWORD", "/d", "32", "/f"])
-        } else {
-            Logger.shared.info("Configuring Wine for WineD3D (fallback mode)")
+        // 6. DirectX version registry (GTA SA checks this!)
+        runWineCommand("reg", arguments: ["add", "HKLM\\Software\\Microsoft\\DirectX", "/v", "Version", "/d", "4.09.00.0904", "/f"])
+        runWineCommand("reg", arguments: ["add", "HKLM\\Software\\Microsoft\\DirectX", "/v", "InstalledVersion", "/d", "4.09.00.0904", "/f"])
 
-            // Force builtin WineD3D (not native DXVK DLLs)
-            runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\DllOverrides", "/v", "d3d9", "/d", "builtin", "/f"])
-            runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\DllOverrides", "/v", "dxgi", "/d", "builtin", "/f"])
-            runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\DllOverrides", "/v", "d3d11", "/d", "builtin", "/f"])
-
-            // WineD3D optimizations
-            runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "DirectDrawRenderer", "/d", "opengl", "/f"])
-            runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "OffScreenRenderingMode", "/d", "fbo", "/f"])
-            runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "PixelShaderMode", "/d", "enabled", "/f"])
-            runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\X11 Driver", "/v", "ScreenDepth", "/t", "REG_DWORD", "/d", "32", "/f"])
-
-            // ARB shaders (more stable than GLSL on macOS)
-            runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Direct3D", "/v", "UseGLSL", "/d", "disabled", "/f"])
-        }
+        Logger.shared.info("WineD3D configuration complete")
     }
 
     // MARK: - Execution
 
-    /// Detecteaza daca executabilul este un installer
     private func isInstaller(_ executablePath: String) -> Bool {
         let fileName = URL(fileURLWithPath: executablePath).lastPathComponent.lowercased()
-        let installerPatterns = [
-            "setup", "install", "installer", "unins",
-            "uninst", "uninstall", "wise", "nsis"
-        ]
+        let installerPatterns = ["setup", "install", "installer", "unins", "uninst", "uninstall"]
         return installerPatterns.contains { fileName.contains($0) }
     }
 
-    /// Aplica safe mode pentru installere (fara virtual desktop)
     private func applySafeModeForInstaller() {
         Logger.shared.info("Applying safe mode for installer...")
-        // Sterge virtual desktop pentru installer
         runWineCommand("reg", arguments: ["delete", "HKCU\\Software\\Wine\\Explorer", "/v", "Desktop", "/f"])
         runWineCommand("reg", arguments: ["delete", "HKCU\\Software\\Wine\\Explorer\\Desktops", "/v", "Default", "/f"])
     }
 
-    /// Restabileste virtual desktop dupa installer
     private func restoreVirtualDesktop() {
         Logger.shared.info("Restoring virtual desktop...")
         runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Explorer", "/v", "Desktop", "/d", "Default", "/f"])
         runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Explorer\\Desktops", "/v", "Default", "/d", "1280x720", "/f"])
     }
 
-    /// Aplica low-end performance patch pentru M2 8GB
-    private func applyLowEndPatch(gameDir: URL) {
-        Logger.shared.info("Applying low-end performance patch...")
-
-        // Path to patch script
-        guard let bundlePath = Bundle.main.resourcePath else { return }
-        let patchScript = URL(fileURLWithPath: bundlePath)
-            .appendingPathComponent("GameOptimizations/patches/apply-low-end-settings.sh")
-
-        // Fallback: check in project root
-        let fallbackScript = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-            .appendingPathComponent("GameOptimizations/patches/apply-low-end-settings.sh")
-
-        let scriptPath = FileManager.default.fileExists(atPath: patchScript.path) ? patchScript : fallbackScript
-
-        if !FileManager.default.fileExists(atPath: scriptPath.path) {
-            Logger.shared.warning("Low-end patch script not found, applying manual settings...")
-            applyManualLowEndSettings(gameDir: gameDir)
-            return
-        }
-
-        // Run patch script
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/bash")
-        process.arguments = [scriptPath.path, gameDir.path]
-        try? process.run()
-        process.waitUntilExit()
-
-        if process.terminationStatus == 0 {
-            Logger.shared.info("Low-end patch applied successfully")
-        } else {
-            Logger.shared.warning("Patch script failed, applying manual settings...")
-            applyManualLowEndSettings(gameDir: gameDir)
-        }
-    }
-
-    /// Manual low-end settings (fallback)
-    private func applyManualLowEndSettings(gameDir: URL) {
-        let settingsPath = gameDir.appendingPathComponent("gta_sa.set")
-
-        let lowEndConfig = """
-        [Display]
-        Width=640
-        Height=480
-        Depth=32
-        Windowed=0
-        VSync=0
-        FrameLimiter=0
-
-        [Graphics]
-        VideoMode=1
-        Brightness=0
-        DrawDistance=0.400000
-        AntiAliasing=0
-        VisualFX=0
-        MipMapping=0
-        Shadows=0
-
-        [Audio]
-        SfxVolume=100
-        MusicVolume=50
-        RadioVolume=50
-        """
-
-        try? lowEndConfig.write(to: settingsPath, atomically: true, encoding: .utf8)
-        Logger.shared.info("Manual low-end settings applied")
-    }
-
     func launchGame(executablePath: String, arguments: [String] = [], completion: @escaping (Bool) -> Void) {
         if isRunning { completion(false); return }
 
         DispatchQueue.global(qos: .userInitiated).async {
-            // Detectam daca e installer si aplicam safe mode
             let isInstaller = self.isInstaller(executablePath)
             if isInstaller {
                 self.applySafeModeForInstaller()
             }
 
-            // Install DXVK DLLs to Wine prefix AND game folder if available
-            var dxvkInstalled = false
+            // Only clean DXVK from game folder (NOT System32!)
             if !isInstaller {
-                // Get game folder from executable path
                 let gameFolder = URL(fileURLWithPath: executablePath).deletingLastPathComponent()
-                dxvkInstalled = self.installDXVKToPrefix(gameFolder: gameFolder)
+                self.cleanGameFolderDXVK(gameFolder: gameFolder)
             }
 
-            // Detect if DXVK is available (only if DLLs were installed AND MoltenVK exists)
-            let useDXVK = dxvkInstalled && self.isDXVKInstalled() && !isInstaller
+            let success = self.runWineProcess(path: executablePath, args: arguments, isInstaller: isInstaller)
 
-            if !dxvkInstalled && !isInstaller {
-                Logger.shared.warning("⚠️  DXVK DLLs not available - using WineD3D fallback")
-                Logger.shared.warning("⚠️  To enable DXVK: Run ./scripts/install-dxvk-direct.sh (on macOS)")
-            }
-
-            let success = self.runWineProcess(path: executablePath, args: arguments, isInstaller: isInstaller, useDXVK: useDXVK)
-
-            // Daca a fost installer, restabilim virtual desktop
             if isInstaller {
                 self.restoreVirtualDesktop()
             }
@@ -479,7 +160,7 @@ class WineManager {
         }
     }
 
-    private func runWineProcess(path: String, args: [String], isInstaller: Bool = false, useDXVK: Bool = false) -> Bool {
+    private func runWineProcess(path: String, args: [String], isInstaller: Bool = false) -> Bool {
         let process = Process()
         process.executableURL = wineExecutableURL
 
@@ -488,47 +169,15 @@ class WineManager {
         env["WINEDEBUG"] = "-all"
 
         if !isInstaller {
-            if useDXVK {
-                // DXVK MODE - DirectX → Vulkan → Metal
-                Logger.shared.info("Using DXVK for rendering")
+            Logger.shared.info("Using WineD3D (OpenGL) for rendering - M2 compatible")
 
-                // DXVK environment variables
-                env["DXVK_HUD"] = "0"  // Disable HUD for performance
-                env["DXVK_ASYNC"] = "1"  // Async shader compilation
-                env["DXVK_STATE_CACHE_PATH"] = appSupportURL.appendingPathComponent("dxvk_cache").path
-                env["DXVK_LOG_LEVEL"] = "warn"
-                env["DXVK_CONFIG_FILE"] = appSupportURL.appendingPathComponent("../GameOptimizations/dxvk/dxvk.conf").path
-
-                // MoltenVK optimizations for M2 8GB
-                env["MVK_CONFIG_LOG_LEVEL"] = "1"  // Errors only
-                env["MVK_CONFIG_TRACE_VULKAN_CALLS"] = "0"
-                env["MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS"] = "0"  // Async
-                env["MVK_CONFIG_PREFILL_METAL_COMMAND_BUFFERS"] = "1"
-                env["MVK_ALLOW_METAL_FENCES"] = "1"
-                env["MVK_ALLOW_METAL_EVENTS"] = "1"
-                env["MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS"] = "1"
-
-                // M2 8GB: Conservative memory settings
-                env["VK_ICD_FILENAMES"] = "/usr/local/share/vulkan/icd.d/MoltenVK_icd.json"
-            } else {
-                // WineD3D MODE - Native Wine Direct3D
-                Logger.shared.info("Using WineD3D for rendering (fallback)")
-
-                // Remove DXVK vars
-                env.removeValue(forKey: "DXVK_HUD")
-                env.removeValue(forKey: "DXVK_ASYNC")
-
-                // CSMT for WineD3D
-                env["CSMT"] = "enabled"
-                env["STAGING_SHARED_MEMORY"] = "1"
-            }
-
-            // Common optimizations (both DXVK and WineD3D)
-            env["WINE_LARGE_ADDRESS_AWARE"] = "1"
-            env["__GL_SHADER_DISK_CACHE_SIZE"] = "268435456"  // 256MB
+            // WineD3D / OpenGL optimizations
+            env["STAGING_SHARED_MEMORY"] = "1"
+            env["__GL_THREADED_OPTIMIZATIONS"] = "1"
             env["__GL_SYNC_TO_VBLANK"] = "0"
+            env["WINE_LARGE_ADDRESS_AWARE"] = "1"
 
-            // M2 optimization
+            // M2 CPU optimization
             var systemInfo = utsname()
             uname(&systemInfo)
             let machine = withUnsafePointer(to: &systemInfo.machine) {
@@ -538,7 +187,7 @@ class WineManager {
             }
             if let machine = machine, machine.contains("arm64") {
                 env["WINE_CPU_TOPOLOGY"] = "4:0"
-                Logger.shared.info("M2 detected - using 4 performance cores")
+                Logger.shared.info("Apple Silicon detected - using 4 performance cores")
             }
         } else {
             Logger.shared.info("Running installer in safe mode")
@@ -555,18 +204,12 @@ class WineManager {
         process.arguments = [fileName] + args
         process.qualityOfService = .userInteractive
 
-        let mode: String
-        if isInstaller {
-            mode = "SAFE MODE (Installer)"
-        } else if useDXVK {
-            mode = "DXVK (DX9→Vulkan→Metal) / M2 Optimized"
-        } else {
-            mode = "WineD3D (Fallback) / XP Mode"
-        }
+        let mode = isInstaller ? "SAFE MODE (Installer)" : "WineD3D (OpenGL) / M2 Optimized"
         Logger.shared.info("Launching: wine \(fileName) (\(mode))")
 
         let logURL = appSupportURL.appendingPathComponent("logs/wine_game.log")
         try? FileManager.default.createDirectory(at: logURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: logURL.path, contents: nil)
         if let logFile = try? FileHandle(forWritingTo: logURL) {
             process.standardOutput = logFile
             process.standardError = logFile
@@ -579,17 +222,19 @@ class WineManager {
             process.terminationHandler = { _ in
                 DispatchQueue.main.async {
                     self.isRunning = false
-                    Logger.shared.info("Process terminated")
+                    Logger.shared.info("Game process terminated")
                 }
             }
             return true
         } catch {
-            Logger.shared.error("Run failed: \(error)")
+            Logger.shared.error("Failed to launch: \(error)")
             return false
         }
     }
 
-    func killWine() { wineProcess?.terminate() }
+    func killWine() {
+        wineProcess?.terminate()
+    }
     
     func shutdown() {
         killWine()
@@ -602,7 +247,11 @@ class WineManager {
     }
 
     func getStatus() -> WineStatus {
-        return WineStatus(isRunning: isRunning, prefixExists: FileManager.default.fileExists(atPath: winePrefixURL.path), wineVersion: "Unknown")
+        return WineStatus(
+            isRunning: isRunning,
+            prefixExists: FileManager.default.fileExists(atPath: winePrefixURL.path),
+            wineVersion: "WineD3D (OpenGL)"
+        )
     }
     
     @discardableResult

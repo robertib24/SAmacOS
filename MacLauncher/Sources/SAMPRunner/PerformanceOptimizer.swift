@@ -2,6 +2,7 @@ import Foundation
 import Metal
 
 /// Handles performance optimization for GTA SA on macOS
+/// NOTE: DXVK is DISABLED on Apple Silicon - using WineD3D instead
 class PerformanceOptimizer {
     static let shared = PerformanceOptimizer()
 
@@ -32,6 +33,12 @@ class PerformanceOptimizer {
         Logger.shared.info("System: \(isAppleSilicon ? "Apple Silicon" : "Intel")")
         if let device = metalDevice {
             Logger.shared.info("GPU: \(device.name)")
+        }
+        
+        // Log DXVK status
+        if isAppleSilicon {
+            Logger.shared.info("DXVK: DISABLED (not compatible with Apple Silicon)")
+            Logger.shared.info("Renderer: WineD3D (OpenGL)")
         }
     }
 
@@ -86,24 +93,33 @@ class PerformanceOptimizer {
             break // Already handled
         }
 
-        configureDXVK(for: actualPreset)
+        // NOTE: DXVK configuration is DISABLED for Apple Silicon
+        // WineD3D uses OpenGL which doesn't need separate configuration
+        if !isAppleSilicon {
+            configureDXVK(for: actualPreset)
+        } else {
+            Logger.shared.info("Skipping DXVK config (Apple Silicon uses WineD3D)")
+        }
     }
 
     private func getRecommendedPreset() -> PerformancePreset {
         let info = getSystemInfo()
 
-        // Cu WineD3D (fara DXVK), performance-ul e mai slab
-        // Folosim setari mai conservative pentru playability
+        // =======================================================
+        // WineD3D Performance (DXVK disabled on Apple Silicon)
+        // WineD3D uses OpenGL which has more overhead than DXVK
+        // So we use more conservative settings
+        // =======================================================
 
-        // Apple Silicon M2+ with 16GB+ RAM: High
+        // Apple Silicon M2+ with 16GB+ RAM: Medium-High
         if isAppleSilicon && info.totalRAM >= 16 * 1024 * 1024 * 1024 {
-            return .high
+            return .medium  // Conservative for WineD3D
         }
 
-        // Apple Silicon M2/M1 with 8GB RAM: LOW pentru FPS maxim
-        // WineD3D consumption + 8GB limita = trebuie low settings
+        // Apple Silicon M2/M1 with 8GB RAM: LOW for playable FPS
+        // WineD3D + 8GB limit = need low settings
         if isAppleSilicon && info.totalRAM < 16 * 1024 * 1024 * 1024 {
-            return .low  // FORCED LOW pentru M2 8GB
+            return .low  // FORCED LOW for M2 8GB with WineD3D
         }
 
         // Intel with dedicated GPU: Medium
@@ -116,18 +132,19 @@ class PerformanceOptimizer {
             return .low
         }
 
-        // Fallback: Low pentru garantat playable
+        // Fallback: Low for guaranteed playability
         return .low
     }
 
     // MARK: - Settings Application
 
     private func applyLowSettings() {
+        // M2 8GB with WineD3D: Need very low settings for playable FPS
         let settings = GameSettings(
-            resolution: (640, 480),  // M2 8GB: minim pentru FPS playable
-            drawDistance: 0.4,  // Foarte mica pentru performance maxim
+            resolution: (800, 600),  // Low resolution for WineD3D performance
+            drawDistance: 0.5,       // Very low draw distance
             antiAliasing: false,
-            visualFX: 0,  // Minim pentru maxim FPS
+            visualFX: 0,             // Minimal effects
             frameLimiter: false,
             vsync: false
         )
@@ -136,10 +153,10 @@ class PerformanceOptimizer {
 
     private func applyMediumSettings() {
         let settings = GameSettings(
-            resolution: (1024, 768),  // Reduced pentru mai mult FPS
-            drawDistance: 0.7,  // Reduced pentru performance
-            antiAliasing: false,  // Disabled pentru FPS
-            visualFX: 0,  // Minim pentru FPS
+            resolution: (1024, 768),
+            drawDistance: 0.7,
+            antiAliasing: false,
+            visualFX: 1,
             frameLimiter: false,
             vsync: false
         )
@@ -148,10 +165,10 @@ class PerformanceOptimizer {
 
     private func applyHighSettings() {
         let settings = GameSettings(
-            resolution: (1920, 1080),
-            drawDistance: 1.0,  // Reduced pentru performance
-            antiAliasing: false,  // Disabled pentru FPS
-            visualFX: 2,  // Reduced
+            resolution: (1280, 720),
+            drawDistance: 0.9,
+            antiAliasing: false,
+            visualFX: 2,
             frameLimiter: false,
             vsync: false
         )
@@ -159,9 +176,10 @@ class PerformanceOptimizer {
     }
 
     private func applyUltraSettings() {
+        // Note: Ultra is not recommended with WineD3D on Apple Silicon
         let settings = GameSettings(
-            resolution: (2560, 1440),
-            drawDistance: 1.5,
+            resolution: (1920, 1080),
+            drawDistance: 1.0,
             antiAliasing: true,
             visualFX: 3,
             frameLimiter: false,
@@ -171,11 +189,10 @@ class PerformanceOptimizer {
     }
 
     private func applyGameSettings(_ settings: GameSettings) {
-        // Write settings to gta_sa.set file
-        // Aici era eroarea: getGamePath() trebuie sa existe in GameInstaller
         let gtaSAPath = GameInstaller.shared.getGamePath()
         let settingsPath = gtaSAPath.appendingPathComponent("gta_sa.set")
 
+        // GTA SA settings file for WineD3D
         let config = """
         [Display]
         Width=\(settings.resolution.0)
@@ -192,7 +209,13 @@ class PerformanceOptimizer {
         AntiAliasing=\(settings.antiAliasing ? 1 : 0)
         VisualFX=\(settings.visualFX)
         MipMapping=1
-
+        TextureQuality=0
+        
+        [Effects]
+        Shadows=0
+        DynamicShadows=0
+        Reflections=0
+        
         [Audio]
         SfxVolume=100
         MusicVolume=80
@@ -201,108 +224,90 @@ class PerformanceOptimizer {
         """
 
         try? config.write(to: settingsPath, atomically: true, encoding: .utf8)
+        Logger.shared.info("Game settings applied: \(settings.resolution.0)x\(settings.resolution.1)")
     }
 
-    // MARK: - DXVK Configuration
+    // MARK: - DXVK Configuration (Intel Macs only)
 
     private func configureDXVK(for preset: PerformancePreset) {
+        // NOTE: This is only used on Intel Macs
+        // Apple Silicon uses WineD3D (OpenGL) instead
+        
+        if isAppleSilicon {
+            Logger.shared.info("Skipping DXVK config - Apple Silicon uses WineD3D")
+            return
+        }
+        
         let dxvkConfig = generateDXVKConfig(for: preset)
         let configPath = appSupportURL.appendingPathComponent("dxvk.conf")
 
         try? dxvkConfig.write(to: configPath, atomically: true, encoding: .utf8)
 
-        Logger.shared.info("DXVK configuration updated")
+        Logger.shared.info("DXVK configuration updated (Intel Mac)")
     }
 
     private func generateDXVKConfig(for preset: PerformancePreset) -> String {
+        // Only for Intel Macs - Apple Silicon doesn't use DXVK
         let numThreads = ProcessInfo.processInfo.processorCount
 
-        switch preset {
-        case .low, .medium:
-            return """
-            # DXVK Configuration - Low/Medium Preset
-
-            dxvk.enableAsync = True
-            dxvk.numCompilerThreads = \(max(2, numThreads / 2))
-            dxvk.maxFrameLatency = 2
-            dxvk.maxDeviceMemory = 2048
-            dxvk.enableGraphicsPipelineLibrary = False
-            dxvk.useRawSsbo = True
-            dxvk.enableStateCache = True
-            """
-
-        case .high:
-            return """
-            # DXVK Configuration - High Preset
-
-            dxvk.enableAsync = True
-            dxvk.numCompilerThreads = \(numThreads)
-            dxvk.maxFrameLatency = 1
-            dxvk.maxDeviceMemory = 4096
-            dxvk.enableGraphicsPipelineLibrary = True
-            dxvk.useRawSsbo = True
-            dxvk.enableStateCache = True
-            dxvk.hud = fps
-            """
-
-        case .ultra:
-            return """
-            # DXVK Configuration - Ultra Preset
-
-            dxvk.enableAsync = True
-            dxvk.numCompilerThreads = \(numThreads)
-            dxvk.maxFrameLatency = 1
-            dxvk.maxDeviceMemory = 8192
-            dxvk.enableGraphicsPipelineLibrary = True
-            dxvk.useRawSsbo = True
-            dxvk.enableStateCache = True
-            dxvk.hud = fps,devinfo,memory
-
-            # Ultra-specific optimizations
-            dxvk.maxChunkSize = 128
-            """
-
-        case .auto:
-            return generateDXVKConfig(for: getRecommendedPreset())
-        }
+        return """
+        # DXVK Configuration (Intel Mac only)
+        # Apple Silicon uses WineD3D instead
+        
+        dxvk.enableAsync = True
+        dxvk.numCompilerThreads = \(max(2, numThreads / 2))
+        dxvk.maxFrameLatency = 2
+        dxvk.maxDeviceMemory = 2048
+        dxvk.enableGraphicsPipelineLibrary = False
+        dxvk.useRawSsbo = True
+        dxvk.enableStateCache = True
+        """
     }
 
-    // MARK: - Shader Cache Management
+    // MARK: - Shader Cache Management (WineD3D)
 
     func precompileShaders(progress: @escaping (Double, String) -> Void) {
-        Logger.shared.info("Precompiling shader cache...")
+        Logger.shared.info("Shader cache setup...")
 
         DispatchQueue.global(qos: .userInitiated).async {
-            // Check if shader cache exists
-            let cacheFile = self.dxvkCachePath.appendingPathComponent("GTA_SA.dxvk-cache")
-
-            if FileManager.default.fileExists(atPath: cacheFile.path) {
-                Logger.shared.info("Shader cache already exists")
-                progress(1.0, "Shader cache ready")
-                return
+            if self.isAppleSilicon {
+                // WineD3D uses OpenGL shader cache managed by the system
+                Logger.shared.info("WineD3D uses system OpenGL shader cache")
+                progress(1.0, "WineD3D ready (OpenGL)")
+            } else {
+                // DXVK shader cache for Intel Macs
+                let cacheFile = self.dxvkCachePath.appendingPathComponent("GTA_SA.dxvk-cache")
+                
+                if FileManager.default.fileExists(atPath: cacheFile.path) {
+                    Logger.shared.info("DXVK shader cache exists")
+                    progress(1.0, "Shader cache ready")
+                } else {
+                    progress(1.0, "Shader cache will build on first launch")
+                }
             }
-
-            // Download pre-compiled shader cache if available
-            progress(0.5, "Downloading shader cache...")
-
-            // In production, this would download from a CDN
-            // For now, we'll let DXVK build it on first run
-
-            progress(1.0, "Shader cache will be built on first launch")
         }
     }
 
     func clearShaderCache() {
         Logger.shared.info("Clearing shader cache...")
 
-        do {
-            let contents = try FileManager.default.contentsOfDirectory(at: dxvkCachePath, includingPropertiesForKeys: nil)
-            for file in contents {
-                try FileManager.default.removeItem(at: file)
+        if isAppleSilicon {
+            // WineD3D OpenGL cache is managed by macOS
+            // Clear Wine's GL shader cache
+            let glCache = appSupportURL.appendingPathComponent("wine/drive_c/windows/temp")
+            try? FileManager.default.removeItem(at: glCache)
+            Logger.shared.info("WineD3D cache cleared")
+        } else {
+            // Clear DXVK cache for Intel
+            do {
+                let contents = try FileManager.default.contentsOfDirectory(at: dxvkCachePath, includingPropertiesForKeys: nil)
+                for file in contents {
+                    try FileManager.default.removeItem(at: file)
+                }
+                Logger.shared.info("DXVK shader cache cleared")
+            } catch {
+                Logger.shared.error("Failed to clear shader cache: \(error.localizedDescription)")
             }
-            Logger.shared.info("Shader cache cleared")
-        } catch {
-            Logger.shared.error("Failed to clear shader cache: \(error.localizedDescription)")
         }
     }
 
@@ -361,8 +366,6 @@ class PerformanceOptimizer {
 
     private func getGPUUsage() -> Double {
         // macOS doesn't provide easy GPU usage API
-        // This would require IOKit or Metal performance counters
-        // Returning 0 for now
         return 0.0
     }
 }
