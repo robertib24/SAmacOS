@@ -38,10 +38,10 @@ class WineManager {
             }
 
             // Install DXVK to Wine prefix if available in WineEngine
-            self.installDXVKToPrefix()
+            let dxvkInstalled = self.installDXVKToPrefix()
 
             // Configure Wine - try DXVK first if available
-            let useDXVK = self.isDXVKInstalled()
+            let useDXVK = dxvkInstalled && self.isDXVKInstalled()
             self.configureWine(useDXVK: useDXVK)
 
             if useDXVK {
@@ -104,7 +104,8 @@ class WineManager {
     }
 
     /// Install DXVK DLLs from WineEngine to Wine prefix AND game folder
-    private func installDXVKToPrefix(gameFolder: URL? = nil) {
+    /// Returns: true if DXVK DLLs were installed, false if not available
+    private func installDXVKToPrefix(gameFolder: URL? = nil) -> Bool {
         let fileManager = FileManager.default
 
         // Check if DXVK DLLs are available in WineEngine
@@ -125,14 +126,14 @@ class WineManager {
         // Get DXVK DLLs
         guard let dllFiles = try? fileManager.contentsOfDirectory(atPath: wineEngineDLLs.path) else {
             Logger.shared.debug("No DXVK DLLs found in WineEngine")
-            return
+            return false
         }
 
         let dxvkDlls = dllFiles.filter { $0.hasSuffix(".dll") }
 
         if dxvkDlls.isEmpty {
             Logger.shared.debug("No DXVK DLLs found to install")
-            return
+            return false
         }
 
         Logger.shared.info("Installing DXVK DLLs to Wine prefix and game folder...")
@@ -183,28 +184,49 @@ class WineManager {
                 Logger.shared.info("✓ Installed \(gameInstalledCount) DXVK DLLs to game folder")
             }
         }
+
+        return installedCount > 0
     }
 
     /// Install DXVK from project root (fallback for development builds)
-    private func installDXVKFromProjectRoot(gameFolder: URL? = nil) {
+    /// Returns: true if DXVK DLLs were installed, false if not available
+    private func installDXVKFromProjectRoot(gameFolder: URL? = nil) -> Bool {
         let fileManager = FileManager.default
         let currentDir = fileManager.currentDirectoryPath
-        let wineEngineDLLs = URL(fileURLWithPath: currentDir)
-            .appendingPathComponent("WineEngine/dlls/x32")
 
-        guard fileManager.fileExists(atPath: wineEngineDLLs.path),
-              let dllFiles = try? fileManager.contentsOfDirectory(atPath: wineEngineDLLs.path) else {
-            Logger.shared.debug("DXVK DLLs not found in project root either")
-            return
+        // Log current directory for debugging
+        Logger.shared.debug("Current directory: \(currentDir)")
+
+        // Try multiple paths: current dir, parent dir (for MacLauncher builds)
+        let possiblePaths = [
+            URL(fileURLWithPath: currentDir).appendingPathComponent("WineEngine/dlls/x32"),
+            URL(fileURLWithPath: currentDir).appendingPathComponent("../WineEngine/dlls/x32"),
+        ]
+
+        var wineEngineDLLs: URL?
+        for path in possiblePaths {
+            let normalizedPath = path.standardized
+            Logger.shared.debug("Checking path: \(normalizedPath.path)")
+            if fileManager.fileExists(atPath: normalizedPath.path) {
+                wineEngineDLLs = normalizedPath
+                Logger.shared.debug("✓ Found WineEngine DLLs at: \(normalizedPath.path)")
+                break
+            }
+        }
+
+        guard let dllPath = wineEngineDLLs,
+              let dllFiles = try? fileManager.contentsOfDirectory(atPath: dllPath.path) else {
+            Logger.shared.debug("DXVK DLLs not found in any search path")
+            return false
         }
 
         let dxvkDlls = dllFiles.filter { $0.hasSuffix(".dll") }
 
         if dxvkDlls.isEmpty {
-            return
+            return false
         }
 
-        Logger.shared.info("Installing DXVK DLLs from project root...")
+        Logger.shared.info("Installing DXVK DLLs from: \(dllPath.path)")
 
         // 1. Copy to Wine prefix system32
         let system32 = winePrefixURL.appendingPathComponent("drive_c/windows/system32")
@@ -212,7 +234,7 @@ class WineManager {
 
         var installedCount = 0
         for dll in dxvkDlls {
-            let source = wineEngineDLLs.appendingPathComponent(dll)
+            let source = dllPath.appendingPathComponent(dll)
             let dest = system32.appendingPathComponent(dll)
 
             try? fileManager.removeItem(at: dest)
@@ -233,7 +255,7 @@ class WineManager {
         if let gameFolderURL = gameFolder {
             var gameInstalledCount = 0
             for dll in dxvkDlls {
-                let source = wineEngineDLLs.appendingPathComponent(dll)
+                let source = dllPath.appendingPathComponent(dll)
                 let dest = gameFolderURL.appendingPathComponent(dll)
 
                 try? fileManager.removeItem(at: dest)
@@ -250,6 +272,8 @@ class WineManager {
                 Logger.shared.info("✓ Installed \(gameInstalledCount) DXVK DLLs to game folder (project root)")
             }
         }
+
+        return installedCount > 0
     }
 
     /// Check if DXVK is installed AND MoltenVK is available
@@ -429,14 +453,20 @@ class WineManager {
             }
 
             // Install DXVK DLLs to Wine prefix AND game folder if available
+            var dxvkInstalled = false
             if !isInstaller {
                 // Get game folder from executable path
                 let gameFolder = URL(fileURLWithPath: executablePath).deletingLastPathComponent()
-                self.installDXVKToPrefix(gameFolder: gameFolder)
+                dxvkInstalled = self.installDXVKToPrefix(gameFolder: gameFolder)
             }
 
-            // Detect if DXVK is available
-            let useDXVK = self.isDXVKInstalled() && !isInstaller
+            // Detect if DXVK is available (only if DLLs were installed AND MoltenVK exists)
+            let useDXVK = dxvkInstalled && self.isDXVKInstalled() && !isInstaller
+
+            if !dxvkInstalled && !isInstaller {
+                Logger.shared.warning("⚠️  DXVK DLLs not available - using WineD3D fallback")
+                Logger.shared.warning("⚠️  To enable DXVK: Run ./scripts/install-dxvk-direct.sh (on macOS)")
+            }
 
             let success = self.runWineProcess(path: executablePath, args: arguments, isInstaller: isInstaller, useDXVK: useDXVK)
 
