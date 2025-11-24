@@ -92,33 +92,36 @@ class PerformanceOptimizer {
     private func getRecommendedPreset() -> PerformancePreset {
         let info = getSystemInfo()
 
-        // Apple Silicon M2+ with 16GB+ RAM: Ultra
+        // Cu WineD3D (fara DXVK), performance-ul e mai slab
+        // Folosim setari mai conservative pentru playability
+
+        // Apple Silicon M2+ with 16GB+ RAM: High (era Ultra)
         if isAppleSilicon && info.totalRAM >= 16 * 1024 * 1024 * 1024 {
-            return .ultra
+            return .high  // Reduced de la .ultra
         }
 
-        // Apple Silicon M1 or Intel with decent GPU: High
+        // Apple Silicon M1 or Intel with decent GPU: Medium (era High)
         if isAppleSilicon || info.gpuName.contains("Radeon") || info.gpuName.contains("AMD") {
-            return .high
+            return .medium  // Reduced de la .high
         }
 
-        // Intel with integrated GPU: Medium
+        // Intel with integrated GPU: Low (era Medium)
         if info.gpuName.contains("Intel") {
-            return .medium
+            return .low  // Reduced de la .medium
         }
 
-        // Fallback: Medium
-        return .medium
+        // Fallback: Low pentru garantat playable
+        return .low
     }
 
     // MARK: - Settings Application
 
     private func applyLowSettings() {
         let settings = GameSettings(
-            resolution: (1280, 720),
-            drawDistance: 0.8,
+            resolution: (1024, 768),  // Reduced pentru mai mult FPS
+            drawDistance: 0.6,  // Mai mica pentru performance
             antiAliasing: false,
-            visualFX: 1,
+            visualFX: 0,  // Minim pentru maxim FPS
             frameLimiter: false,
             vsync: false
         )
@@ -127,10 +130,10 @@ class PerformanceOptimizer {
 
     private func applyMediumSettings() {
         let settings = GameSettings(
-            resolution: (1920, 1080),
-            drawDistance: 1.0,
-            antiAliasing: true,
-            visualFX: 2,
+            resolution: (1280, 720),  // Reduced de la 1920x1080
+            drawDistance: 0.8,  // Reduced pentru performance
+            antiAliasing: false,  // Disabled pentru FPS
+            visualFX: 1,  // Reduced
             frameLimiter: false,
             vsync: false
         )
@@ -140,9 +143,9 @@ class PerformanceOptimizer {
     private func applyHighSettings() {
         let settings = GameSettings(
             resolution: (1920, 1080),
-            drawDistance: 1.2,
-            antiAliasing: true,
-            visualFX: 3,
+            drawDistance: 1.0,  // Reduced pentru performance
+            antiAliasing: false,  // Disabled pentru FPS
+            visualFX: 2,  // Reduced
             frameLimiter: false,
             vsync: false
         )
