@@ -129,20 +129,57 @@ class WineManager {
 
     // MARK: - Execution
 
+    /// Detecteaza daca executabilul este un installer
+    private func isInstaller(_ executablePath: String) -> Bool {
+        let fileName = URL(fileURLWithPath: executablePath).lastPathComponent.lowercased()
+        let installerPatterns = [
+            "setup", "install", "installer", "unins",
+            "uninst", "uninstall", "wise", "nsis"
+        ]
+        return installerPatterns.contains { fileName.contains($0) }
+    }
+
+    /// Aplica safe mode pentru installere (fara virtual desktop)
+    private func applySafeModeForInstaller() {
+        Logger.shared.info("Applying safe mode for installer...")
+        // Sterge virtual desktop pentru installer
+        runWineCommand("reg", arguments: ["delete", "HKCU\\Software\\Wine\\Explorer", "/v", "Desktop", "/f"])
+        runWineCommand("reg", arguments: ["delete", "HKCU\\Software\\Wine\\Explorer\\Desktops", "/v", "Default", "/f"])
+    }
+
+    /// Restabileste virtual desktop dupa installer
+    private func restoreVirtualDesktop() {
+        Logger.shared.info("Restoring virtual desktop...")
+        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Explorer", "/v", "Desktop", "/d", "Default", "/f"])
+        runWineCommand("reg", arguments: ["add", "HKCU\\Software\\Wine\\Explorer\\Desktops", "/v", "Default", "/d", "1280x720", "/f"])
+    }
+
     func launchGame(executablePath: String, arguments: [String] = [], completion: @escaping (Bool) -> Void) {
         if isRunning { completion(false); return }
-        
+
         DispatchQueue.global(qos: .userInitiated).async {
             // Asiguram curatarea DXVK inainte de fiecare lansare
             let gameDir = URL(fileURLWithPath: executablePath).deletingLastPathComponent()
             self.removeDXVK(targetFolder: gameDir)
-            
-            let success = self.runWineProcess(path: executablePath, args: arguments)
+
+            // Detectam daca e installer si aplicam safe mode
+            let isInstaller = self.isInstaller(executablePath)
+            if isInstaller {
+                self.applySafeModeForInstaller()
+            }
+
+            let success = self.runWineProcess(path: executablePath, args: arguments, isInstaller: isInstaller)
+
+            // Daca a fost installer, restabilim virtual desktop
+            if isInstaller {
+                self.restoreVirtualDesktop()
+            }
+
             DispatchQueue.main.async { completion(success) }
         }
     }
 
-    private func runWineProcess(path: String, args: [String]) -> Bool {
+    private func runWineProcess(path: String, args: [String], isInstaller: Bool = false) -> Bool {
         let process = Process()
         process.executableURL = wineExecutableURL
 
@@ -154,36 +191,41 @@ class WineManager {
         env.removeValue(forKey: "DXVK_HUD")
         env.removeValue(forKey: "DXVK_ASYNC")
 
-        // PERFORMANCE BOOST: Enable CSMT (Command Stream Multi-Threading)
-        // Aceasta este cea mai importanta optimizare pentru WineD3D!
-        env["CSMT"] = "enabled"
-        env["STAGING_SHARED_MEMORY"] = "1"
+        if !isInstaller {
+            // PERFORMANCE BOOST: Enable CSMT (Command Stream Multi-Threading)
+            // Aceasta este cea mai importanta optimizare pentru WineD3D!
+            env["CSMT"] = "enabled"
+            env["STAGING_SHARED_MEMORY"] = "1"
 
-        // PERFORMANCE BOOST: Wine optimizations
-        env["WINE_LARGE_ADDRESS_AWARE"] = "1"  // Mai mult RAM pentru joc
-        env["__GL_THREADED_OPTIMIZATIONS"] = "1"  // OpenGL threading
+            // PERFORMANCE BOOST: Wine optimizations
+            env["WINE_LARGE_ADDRESS_AWARE"] = "1"  // Mai mult RAM pentru joc
+            env["__GL_THREADED_OPTIMIZATIONS"] = "1"  // OpenGL threading
 
-        // Esync/Fsync pentru latenta mai mica
-        env["WINEESYNC"] = "1"
-        env["WINEFSYNC"] = "1"
+            // Esync/Fsync pentru latenta mai mica
+            env["WINEESYNC"] = "1"
+            env["WINEFSYNC"] = "1"
 
-        // macOS specific optimizations
-        env["FREETYPE_PROPERTIES"] = "truetype:interpreter-version=35"
-
-        // PERFORMANCE: Apple Silicon - prioritize performance cores
-        var systemInfo = utsname()
-        uname(&systemInfo)
-        let machine = withUnsafePointer(to: &systemInfo.machine) {
-            $0.withMemoryRebound(to: CChar.self, capacity: 1) {
-                String(validatingUTF8: $0)
+            // PERFORMANCE: Apple Silicon - prioritize performance cores
+            var systemInfo = utsname()
+            uname(&systemInfo)
+            let machine = withUnsafePointer(to: &systemInfo.machine) {
+                $0.withMemoryRebound(to: CChar.self, capacity: 1) {
+                    String(validatingUTF8: $0)
+                }
             }
+            if let machine = machine, machine.contains("arm64") {
+                // Pe Apple Silicon, folosim performance cores
+                let perfCores = ProcessInfo.processInfo.processorCount / 2
+                env["WINE_CPU_TOPOLOGY"] = "4:0"  // Forteaza pe primele 4 P-cores
+                Logger.shared.info("Apple Silicon detected - using performance cores")
+            }
+        } else {
+            // SAFE MODE pentru installere - minimal env vars
+            Logger.shared.info("Running installer in safe mode (no virtual desktop, minimal optimizations)")
         }
-        if let machine = machine, machine.contains("arm64") {
-            // Pe Apple Silicon, folosim performance cores
-            let perfCores = ProcessInfo.processInfo.processorCount / 2
-            env["WINE_CPU_TOPOLOGY"] = "4:0"  // Forteaza pe primele 4 P-cores
-            Logger.shared.info("Apple Silicon detected - using performance cores")
-        }
+
+        // macOS specific optimizations (aplicam si pentru installere)
+        env["FREETYPE_PROPERTIES"] = "truetype:interpreter-version=35"
 
         process.environment = env
 
@@ -197,7 +239,8 @@ class WineManager {
         // Set high priority pentru mai bun performance
         process.qualityOfService = .userInteractive
 
-        Logger.shared.info("Launching: wine \(fileName) (WineD3D+CSMT / XP Mode / Optimized)")
+        let mode = isInstaller ? "SAFE MODE (Installer)" : "WineD3D+CSMT / XP Mode / Optimized"
+        Logger.shared.info("Launching: wine \(fileName) (\(mode))")
 
         let logURL = appSupportURL.appendingPathComponent("logs/wine_game.log")
         try? FileManager.default.createDirectory(at: logURL.deletingLastPathComponent(), withIntermediateDirectories: true)
