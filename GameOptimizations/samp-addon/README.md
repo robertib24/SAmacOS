@@ -2,6 +2,17 @@
 
 SAMP Addon este cel mai bun mod pentru a optimiza SA-MP pe low-end systems.
 
+## ⚠️ IMPORTANT - Ordinea de instalare!
+
+**ORDINEA CORECTĂ:**
+1. ✅ Instalează GTA San Andreas
+2. ✅ Instalează SAMP Addon 2.6
+3. ✅ **REINSTALEAZĂ SA-MP** (peste SAMP Addon)
+
+**Dacă nu reinstalezi SA-MP după SAMP Addon, jocul NU VA PORNI!**
+
+SAMP Addon modifică fișiere care trebuie suprascrise de SA-MP pentru ca multiplayer-ul să funcționeze.
+
 ## Ce face SAMP Addon?
 
 ✅ **Graphics optimizations:**
@@ -24,34 +35,48 @@ SAMP Addon este cel mai bun mod pentru a optimiza SA-MP pe low-end systems.
 
 ## Instalare
 
-### Metoda 1: Script automat (recomandat)
+### ⚠️ CRITICIAL - Pași în ordinea corectă:
 
+**Pasul 1: Instalează GTA San Andreas**
+- Rulează installer-ul GTA SA normal
+- Finalizează instalarea
+
+**Pasul 2: Instalează SAMP Addon**
+
+Script automat (recomandat):
 ```bash
 cd GameOptimizations/samp-addon
 ./install-samp-addon.sh
 ```
 
-Scriptul va:
-1. Deschide link-ul de download în browser
-2. Te va ghida să descarci SAMP_Addon_2.6_Setup.exe
-3. Va rula installer-ul automat
-
-### Metoda 2: Manual
-
-1. **Download:**
-   - Link: https://www.mediafire.com/file/tas2s0a1f75e3oz/SAMP_Addon_2.6_Setup.exe/file
-   - Salvează în: `GameOptimizations/samp-addon/SAMP_Addon_2.6_Setup.exe`
-
-2. **Install:**
+Manual:
+1. Download: https://www.mediafire.com/file/tas2s0a1f75e3oz/SAMP_Addon_2.6_Setup.exe/file
+2. Salvează ca: `SAMP_Addon_2.6_Setup.exe`
+3. Rulează installer-ul:
    ```bash
-   cd ~/Library/Application\ Support/SA-MP\ Runner/wine/drive_c/
-   wine ~/path/to/SAMP_Addon_2.6_Setup.exe
+   wine SAMP_Addon_2.6_Setup.exe
    ```
+4. Selectează folderul GTA San Andreas
+5. Bifează toate componentele
+6. Instalează
 
-3. **Configure:**
-   - Selectează folderul GTA San Andreas
-   - Bifează "Install all components"
-   - Finalizează instalarea
+**Pasul 3: ⚠️ REINSTALEAZĂ SA-MP (OBLIGATORIU!)**
+
+```bash
+# Rulează din nou installer-ul SA-MP
+wine samp_install.exe
+```
+
+**De ce?** SAMP Addon modifică anumite DLL-uri și fișiere care trebuie suprascrise de SA-MP pentru ca multiplayer-ul să funcționeze. Dacă nu reinstalezi SA-MP, jocul nu va porni!
+
+### Quick reinstall command:
+
+```bash
+# După ce ai instalat SAMP Addon, rulează:
+wine /path/to/samp_install.exe
+```
+
+Selectează același folder GTA SA și reinstalează.
 
 ## Performance pe M2 8GB
 
@@ -75,6 +100,11 @@ SAMP Addon va face optimizările automat, nu trebuie setări extreme low!
 
 ## Troubleshooting
 
+**Problem:** Jocul nu pornește după SAMP Addon
+- **Fix:** ⚠️ **TREBUIE să reinstalezi SA-MP!** (vezi Pasul 3 de mai sus)
+- SAMP Addon override-uiește fișiere SA-MP critice
+- Reinstalare SA-MP suprascrie cu versiunile corecte
+
 **Problem:** Installer nu pornește
 - **Fix:** Rulează din Safe Mode (launcher detectează automat)
 
@@ -82,7 +112,10 @@ SAMP Addon va face optimizările automat, nu trebuie setări extreme low!
 - **Fix:** Deja fixat în Wine registry (ARB shaders)
 
 **Problem:** FPS încă scăzut
-- **Fix:** Reinstall SAMP Addon, asigură-te că ai bifat "Performance mode"
+- **Fix:**
+  1. Verifică că ai reinstalat SA-MP după SAMP Addon
+  2. Reinstall SAMP Addon, asigură-te că ai bifat "Performance mode"
+  3. Verifică că jocul rulează în 1024x768 sau mai mic
 
 ## Alternative
 
