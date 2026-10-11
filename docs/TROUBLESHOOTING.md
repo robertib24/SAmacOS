@@ -40,6 +40,8 @@ xattr -dr com.apple.quarantine "/Applications/SA-MP Runner.app"
 
 ## Servers
 
+**Connect opens SA-MP's browser instead of joining.** The launcher starts `samp.exe host:port`, the same command a `samp://` link runs. If your SA-MP version shows its browser instead, the server is added there. Double-click it to join.
+
 **SA-MP's own browser shows an empty Internet tab.** The old SA-MP master list is gone. Use the launcher's **Servers** tab, which uses the open.mp list, or add servers to Favorites.
 
 **A server shows "–" for ping.** It didn't answer the UDP query within 1.5 s. It may be offline or block queries. You can still try to connect.
