@@ -21,7 +21,7 @@ jobs:
         run: |
           cd build
           ditto -c -k --keepParent "SA-MP Runner.app" SA-MP-Runner-macOS.zip
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: SA-MP-Runner-macOS
           path: build/SA-MP-Runner-macOS.zip
