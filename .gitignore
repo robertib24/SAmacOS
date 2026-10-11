@@ -23,18 +23,13 @@ build/
 *.dmg
 *.pkg
 
-# Wine
-WineEngine/dlls/
+# Windows binaries (game files, installers) never belong in the repo
 *.exe
 *.dll
 
 # Logs
 *.log
 logs/
-
-# Caches
-dxvk_cache/
-shader_cache/
 
 # Temporary
 temp/

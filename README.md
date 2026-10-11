@@ -1,297 +1,108 @@
-# SA-MP macOS Runner
+# SA-MP Runner for macOS
 
-🎮 Run GTA San Andreas Multiplayer (modded Windows version) natively on macOS with optimal performance.
-
-## Overview
-
-SA-MP macOS Runner is a complete hybrid solution that allows you to play GTA San Andreas Multiplayer on macOS without using virtual machines. The application combines native macOS technologies with Wine compatibility layer for maximum performance.
-
-## Architecture
-
-### Core Components
+Play GTA San Andreas Multiplayer (SA-MP and open.mp servers) on a Mac. Built and tuned for Apple Silicon (tested target: MacBook Pro M2, 8 GB), and also works on Intel Macs.
 
 ```
-┌─────────────────────────────────────────┐
-│   Native macOS Launcher (Swift/AppKit)  │
-│   - UI/UX                                │
-│   - Installation Manager                 │
-│   - Settings & Configuration             │
-└──────────────┬──────────────────────────┘
-               │
-┌──────────────▼──────────────────────────┐
-│   Wine Engine (Optimized)                │
-│   - Crossover/Wine Staging               │
-│   - DXVK (DirectX → Vulkan)              │
-│   - MoltenVK (Vulkan → Metal)            │
-└──────────────┬──────────────────────────┘
-               │
-┌──────────────▼──────────────────────────┐
-│   GTA SA + SA-MP (Windows)               │
-│   - Modded game files                    │
-│   - SA-MP client                         │
-│   - Custom patches                       │
-└─────────────────────────────────────────┘
+gta_sa.exe + samp.dll  (32-bit, Direct3D 9)
+        │
+Wine 11 (WoW64) ── runs on Rosetta 2 on Apple Silicon
+        │
+wined3d ──► Vulkan ──► MoltenVK ──► Metal     (default: "Vulkan" renderer)
+        └─► OpenGL ──► Apple GL-on-Metal       (fallback: "OpenGL" renderer)
 ```
 
-### Performance Pipeline
+## What's new in 2.0 and why it's faster
 
-```
-GTA SA (DirectX 9)
-    → DXVK (DX9 → Vulkan)
-    → MoltenVK (Vulkan → Metal)
-    → macOS GPU (Native performance)
-```
+Version 2.0 is a rewrite. The 1.x launcher had stopped working and was slower than it needed to be:
 
-## Features
+| 1.x problem | 2.0 |
+|---|---|
+| Installed Wine through Homebrew. Homebrew **disabled all Wine casks on 2026‑09‑01**, so fresh installs fail. | Downloads the WineHQ 11 macOS build (Gcenx) directly, pinned to a SHA‑256, into the app's own folder. No Homebrew, nothing system-wide. |
+| Rendered through wined3d's **OpenGL** path. In Wine's WoW64 mode, which current macOS Wine builds use, 32‑bit games' OpenGL buffer maps are **copied** on every map (see `dlls/opengl32/unix_wgl.c`). | Defaults to wined3d's **Vulkan** renderer via MoltenVK, which maps memory straight into the 32‑bit game. OpenGL stays one click away as a fallback. |
+| "Performance presets" wrote INI text into `gta_sa.set` (a binary file) in the game folder, where the game never reads it. `sa-mp.cfg` was written to the wrong folder too. The presets did nothing. | Writes `sa-mp.cfg` where SA-MP actually reads it (`Documents/GTA San Andreas User Files/SAMP`). Leaves `gta_sa.set` alone and tells you which in-game options matter. |
+| Set Linux-only or long-removed options (esync/fsync, `__GL_*`, `UseGLSL`, `DirectDrawRenderer`, a malformed `WINE_CPU_TOPOLOGY`, DXVK on Apple Silicon). | Only options Wine 11, MoltenVK and Metal actually read, all covered by unit tests. |
+| ~20 separate `wine reg add` processes on setup. | One `reg import`, skipped entirely when nothing changed. |
+| Wine linked "My Documents" to `~/Documents`, so macOS privacy prompts appeared and files ended up outside the app. | Documents/Desktop/etc. live inside the prefix. |
+| The "performance monitor" showed the launcher's own CPU use. | Benchmark mode records every frame from Wine and reports **average FPS and 1% lows** after you play. The Metal HUD shows live FPS. |
 
-### ✅ Current Features
-- 🚀 Native macOS application (no VM needed)
-- 📦 Complete installer for GTA SA + SA-MP
-- ⚡ Optimized Wine configuration for gaming
-- 🎯 DXVK + MoltenVK for GPU acceleration
-- 🔧 Automatic performance tuning
-- 🎮 Server browser integration
-- 💾 Mod management system
-- 🔄 Auto-update for SA-MP client
+There are no FPS claims here: nobody has measured this build on your Mac yet. Use **Benchmark mode** to compare the Vulkan and OpenGL renderers on your machine. See [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
 
-### 🔮 Planned Features
-- 📊 Performance monitoring overlay
-- 🎨 Graphics presets (Low/Medium/High/Ultra)
-- 🌐 Integrated server list
-- 🎭 Skin preview and management
-- 🔊 Audio optimization for macOS
-- ☁️ Cloud save synchronization
+## Requirements
 
-## System Requirements
+- macOS 13 Ventura or newer, on Apple Silicon (with Rosetta 2) or Intel
+- Your own **GTA San Andreas** (PC, the **1.0 US** `gta_sa.exe` that SA-MP needs)
+- The **SA-MP 0.3.7** (or 0.3.DL) client, either already in your game folder or as an installer `.exe`
+- About 1.5 GB free for Wine and the prefix, plus the game
 
-### Minimum
-- macOS 11.0 Big Sur or later
-- Apple Silicon (M1/M2/M3) or Intel with Metal support
-- 8 GB RAM
-- 5 GB free disk space
-- GTA San Andreas (Windows version)
+## Getting started
 
-### Recommended
-- macOS 13.0 Ventura or later
-- Apple Silicon M2 or later
-- 16 GB RAM
-- 10 GB free disk space
-- SSD storage
-
-## Installation
-
-### Quick Start
-
-1. Download SA-MP macOS Runner from releases
-2. Install the application to /Applications
-3. Launch and follow the setup wizard
-4. Point to your GTA SA installation or let the installer download it
-5. Play!
-
-### Manual Installation
+### 1. Build the app
 
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/SAmacOS.git
-cd SAmacOS
-
-# Build the native launcher
-cd MacLauncher
-xcodebuild -scheme "SA-MP Runner" -configuration Release
-
-# Install Wine dependencies
-./scripts/install-wine.sh
-
-# Setup DXVK
-./scripts/setup-dxvk.sh
-
-# Configure Wine prefix
-./scripts/create-wineprefix.sh
-```
-
-## Performance Optimization
-
-### For Apple Silicon (M1/M2/M3)
-
-The application uses:
-- **Rosetta 2** for Wine x86 translation
-- **Metal API** for direct GPU access
-- **DXVK** async shader compilation
-- **esync/fsync** for reduced overhead
-- **PBA (Performance Boost Audio)** for audio subsystem
-
-Expected performance: **60+ FPS** at 1080p on M1 or later.
-
-### For Intel Macs
-
-- Uses native x86 Wine builds
-- DXVK with Metal backend
-- Optimized memory allocation
-
-Expected performance: **45+ FPS** at 1080p on recent Intel chips.
-
-## Project Structure
-
-```
-SAmacOS/
-├── MacLauncher/              # Native macOS application (Swift)
-│   ├── Sources/
-│   │   ├── App/              # Main app entry point
-│   │   ├── UI/               # User interface components
-│   │   ├── Installer/        # Game installation logic
-│   │   ├── WineManager/      # Wine process management
-│   │   └── Performance/      # Optimization utilities
-│   ├── Resources/            # Assets, icons, configs
-│   └── SA-MP Runner.xcodeproj
-│
-├── WineEngine/               # Wine configuration and patches
-│   ├── configs/              # Optimized Wine configs
-│   ├── patches/              # Custom Wine patches
-│   └── dlls/                 # Required DLLs
-│
-├── GameOptimizations/        # Performance tweaks
-│   ├── dxvk/                 # DXVK configuration
-│   ├── shaders/              # Shader cache
-│   └── patches/              # Game patches for macOS
-│
-├── Installer/                # Installation scripts
-│   ├── game-installer.sh
-│   ├── samp-installer.sh
-│   └── dependencies.sh
-│
-├── scripts/                  # Build and setup scripts
-│   ├── build.sh
-│   ├── install-wine.sh
-│   ├── setup-dxvk.sh
-│   └── create-wineprefix.sh
-│
-└── docs/                     # Documentation
-    ├── ARCHITECTURE.md
-    ├── PERFORMANCE.md
-    └── TROUBLESHOOTING.md
-```
-
-## Technology Stack
-
-| Component | Technology | Purpose |
-|-----------|-----------|---------|
-| Launcher UI | Swift + AppKit | Native macOS interface |
-| Wine Layer | Wine Crossover 23+ | Windows compatibility |
-| Graphics | DXVK + MoltenVK | DirectX → Metal translation |
-| Audio | PulseAudio + CoreAudio | Audio routing |
-| Networking | Native BSD sockets | Network optimization |
-| Packaging | DMG + Installer pkg | Distribution |
-
-## Development
-
-### Building from Source
-
-```bash
-# Prerequisites
-xcode-select --install
-brew install wine-crossover cmake ninja
-
-# Clone and build
-git clone https://github.com/yourusername/SAmacOS.git
-cd SAmacOS
-
-# Build native launcher
+xcode-select --install          # once, if you don't have Xcode
 ./scripts/build.sh
-
-# Run in development mode
-./scripts/run-dev.sh
+open "build/SA-MP Runner.app"   # or copy it to /Applications
 ```
 
-### Testing
+Every push also produces a ready-made build. Open the latest run under **Actions › CI** and download the `SA-MP-Runner-macOS` artifact. It isn't notarized, so right-click › Open the first time.
+
+### 2. Setup (in the app)
+
+1. **Download & Install Wine** (~190 MB, checksum-verified). The Wine prefix is created right after.
+2. **GTA San Andreas**: choose the folder that contains `gta_sa.exe`. If you used SA-MP Runner 1.x, click **Import from previous SA-MP Runner** instead. That moves the game out of the old prefix and keeps your settings and SA-MP favorites.
+3. **SA-MP**: if `samp.exe` is missing, run the SA-MP installer and pick `C:\Games\GTA San Andreas`.
+4. If leftover DXVK files from 1.x are found, click **Disable Them**.
+
+### 3. Play
+
+- **Play** opens SA-MP's own browser. **Servers** has a native browser with the open.mp public list, favorites and live ping.
+- In the game, set **Options › Display Setup › Frame Limiter: Off**. The launcher's FPS cap (default 60) then applies through SA-MP.
+
+### Command line
+
+Everything the app does is available from Terminal. The tool is `build/samp-runner`, and it also sits inside the app bundle.
 
 ```bash
-# Run unit tests
-./scripts/test.sh
-
-# Performance benchmark
-./scripts/benchmark.sh
+samp-runner setup                         # download Wine, create prefix
+samp-runner import-legacy --delete-old    # or: samp-runner import-game ~/Games/GTA\ San\ Andreas
+samp-runner connect 1.2.3.4:7777
+samp-runner config renderer opengl        # vulkan | opengl
+samp-runner config benchmark on           # then play; results print when the game closes
+samp-runner servers roleplay              # search the open.mp list
+samp-runner doctor                        # diagnose slowness / setup issues
+samp-runner help
 ```
 
-## Configuration
+## Alternatives that were evaluated
 
-### Wine Configuration
+| Option | Why it isn't the default |
+|---|---|
+| **Apple D3DMetal (GPTK)** | Direct3D 11/12 and 64-bit only. GTA SA is 32-bit Direct3D 9. |
+| **DXMT** (Metal D3D11) | Upstream supports D3D10/11 only. D3D9 exists only in experimental forks. |
+| **DXVK** | DXVK-macOS targets D3D10/11, and upstream DXVK 2.x needs Vulkan features MoltenVK doesn't have. The 1.x attempt to use it is why "WineD3D fallback" code existed. |
+| **CrossOver** (paid) | Very good, and fine to use directly. You can also point **Settings › Wine › Custom wine binary** at another Wine engine to try it with this prefix. |
+| **Whisky** | No longer maintained (2025). |
+| **Parallels / UTM VM** | Windows on Arm plus x86 emulation needs 4+ GB of an 8 GB Mac on its own. |
+| **Native port** | There is no complete GTA SA source port, and SA-MP needs the original 1.0 US executable anyway. |
 
-Located in: `~/Library/Application Support/SA-MP Runner/wine/`
+## Project layout
 
-Key settings:
-- `WINEPREFIX`: Isolated Wine environment
-- `DXVK_HUD`: Performance overlay
-- `DXVK_ASYNC`: Async shader compilation
+```
+MacLauncher/                 Swift package
+  Sources/RunnerCore/        all logic, Foundation-only, unit-tested on macOS + Linux
+  Sources/samp-runner/       command-line tool
+  Sources/SAMPRunner/        SwiftUI app
+  Tests/RunnerCoreTests/     unit + end-to-end tests (fake wine)
+scripts/                     build.sh, run-dev.sh, test.sh
+docs/                        ARCHITECTURE, PERFORMANCE, TROUBLESHOOTING, MODS
+```
 
-### Game Settings
-
-Located in: `~/Library/Application Support/SA-MP Runner/gta-sa/`
-
-Automatic optimizations:
-- Frame limiter disabled for maximum FPS
-- Draw distance optimized for macOS
-- Memory pool sizes adjusted
-- Audio buffer tuning
-
-## Troubleshooting
-
-### Common Issues
-
-**Game won't launch:**
-- Check Wine installation: `./scripts/check-wine.sh`
-- Verify GTA SA files are intact
-- Check logs: `~/Library/Logs/SA-MP Runner/`
-
-**Low FPS:**
-- Enable DXVK async: `DXVK_ASYNC=1`
-- Lower graphics settings in-game
-- Check Activity Monitor for background processes
-
-**Crashes:**
-- Update to latest macOS
-- Reinstall Wine engine
-- Check crash logs in Console.app
-
-See [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for detailed solutions.
-
-## Contributing
-
-Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-### Areas needing help:
-- Performance optimization
-- macOS-specific bug fixes
-- UI/UX improvements
-- Documentation
-- Testing on different Mac models
+Data lives in `~/Library/Application Support/SA-MP Runner/`. Run `samp-runner paths` to see exact locations.
 
 ## Legal
 
-This project does NOT include:
-- GTA San Andreas game files
-- SA-MP client files
-- Any copyrighted materials
-
-Users must own a legitimate copy of GTA San Andreas.
-
-## License
-
-MIT License - see [LICENSE](LICENSE) for details.
+This project ships no game files, no SA-MP files and no Wine binaries. You need your own copy of GTA San Andreas. Wine is downloaded from the WineHQ macOS builds at setup time. MIT licensed. See [LICENSE](LICENSE).
 
 ## Credits
 
-- Rockstar Games - GTA San Andreas
-- SA-MP Team - San Andreas Multiplayer
-- Wine Project - Compatibility layer
-- DXVK Project - DirectX to Vulkan
-- MoltenVK - Vulkan to Metal
-
-## Support
-
-- 🐛 Issues: [GitHub Issues](https://github.com/yourusername/SAmacOS/issues)
-- 💬 Discord: [SA-MP macOS Community](https://discord.gg/example)
-- 📖 Wiki: [Documentation](https://github.com/yourusername/SAmacOS/wiki)
-
----
-
-Made with ❤️ for the GTA SA macOS community
+Rockstar Games (GTA San Andreas) · SA-MP team · open.mp · the Wine project · Gcenx (WineHQ macOS builds) · MoltenVK

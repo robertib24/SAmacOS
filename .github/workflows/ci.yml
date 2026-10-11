@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  macos:
+    name: macOS build & tests
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+      - name: Toolchain
+        run: swift --version
+      - name: Tests
+        run: ./scripts/test.sh
+      - name: Build app bundle
+        run: ./scripts/build.sh
+      - name: Package
+        run: |
+          cd build
+          ditto -c -k --keepParent "SA-MP Runner.app" SA-MP-Runner-macOS.zip
+      - uses: actions/upload-artifact@v5
+        with:
+          name: SA-MP-Runner-macOS
+          path: build/SA-MP-Runner-macOS.zip
+
+  linux:
+    name: Core tests (Linux)
+    runs-on: ubuntu-24.04
+    container: swift:6.0
+    steps:
+      - uses: actions/checkout@v5
+      - name: Tests
+        run: swift test --package-path MacLauncher
