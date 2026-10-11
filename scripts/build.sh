@@ -1,135 +1,42 @@
 #!/bin/bash
+# Builds "SA-MP Runner.app" and the samp-runner command-line tool into ./build.
+#
+#   ./scripts/build.sh              native architecture (arm64 on Apple Silicon)
+#   ./scripts/build.sh --universal  arm64 + x86_64
+#
+# Needs Xcode or the Command Line Tools (xcode-select --install). Wine itself is
+# downloaded by the app/CLI on first setup, not bundled here.
+set -euo pipefail
 
-# Build Script for SA-MP Runner
-# Builds the macOS application
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PACKAGE="$ROOT/MacLauncher"
+OUT="$ROOT/build"
+APP="$OUT/SA-MP Runner.app"
+VERSION="2.0.0"
 
-set -e
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-MAC_LAUNCHER_DIR="$PROJECT_ROOT/MacLauncher"
-BUILD_DIR="$PROJECT_ROOT/build"
-
-echo "🔨 Building SA-MP Runner..."
-
-# Check for Xcode
-if ! command -v xcodebuild &> /dev/null; then
-    echo "❌ Xcode not found. Please install Xcode from the App Store."
+if ! command -v swift >/dev/null 2>&1; then
+    echo "Swift not found. Install Xcode or run: xcode-select --install" >&2
     exit 1
 fi
 
-# Check for Swift
-if ! command -v swift &> /dev/null; then
-    echo "❌ Swift not found. Please install Xcode Command Line Tools."
-    exit 1
+ARCH_FLAGS=(--arch "$(uname -m)")
+if [[ "${1:-}" == "--universal" ]]; then
+    ARCH_FLAGS=(--arch arm64 --arch x86_64)
 fi
 
-SWIFT_VERSION=$(swift --version | head -n 1)
-echo "Swift version: $SWIFT_VERSION"
+echo "==> Building (${ARCH_FLAGS[*]})"
+swift build -c release --package-path "$PACKAGE" "${ARCH_FLAGS[@]}" --product SAMPRunner
+swift build -c release --package-path "$PACKAGE" "${ARCH_FLAGS[@]}" --product samp-runner
+BIN="$(swift build -c release --package-path "$PACKAGE" "${ARCH_FLAGS[@]}" --show-bin-path)"
 
-# Create build directory
-mkdir -p "$BUILD_DIR"
+echo "==> Assembling app bundle"
+rm -rf "$APP"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+cp "$BIN/SAMPRunner" "$APP/Contents/MacOS/SA-MP Runner"
+cp "$BIN/samp-runner" "$APP/Contents/MacOS/samp-runner"
+cp "$BIN/samp-runner" "$OUT/samp-runner"
 
-# Build using Swift Package Manager
-echo "📦 Building with Swift Package Manager..."
-cd "$MAC_LAUNCHER_DIR"
-
-# Clean previous build
-swift package clean
-
-# Detect platform architecture
-ARCH=$(uname -m)
-if [[ "$ARCH" == "arm64" ]]; then
-    echo "Building for Apple Silicon (arm64)..."
-    BUILD_ARCH="arm64"
-else
-    echo "Building for Intel (x86_64)..."
-    BUILD_ARCH="x86_64"
-fi
-
-# Build in release mode with proper architecture
-swift build -c release --arch "$BUILD_ARCH"
-
-# Get build output location
-BUILD_OUTPUT=$(swift build -c release --arch "$BUILD_ARCH" --show-bin-path)
-
-echo "✓ Build complete"
-echo "Binary location: $BUILD_OUTPUT/SAMPRunner"
-
-# IMPORTANT: Stay in MacLauncher directory for binary path resolution
-# Create application bundle
-echo "📱 Creating application bundle..."
-
-APP_NAME="SA-MP Runner.app"
-APP_PATH="$BUILD_DIR/$APP_NAME"
-
-# Remove existing bundle
-rm -rf "$APP_PATH"
-
-# Create bundle structure
-mkdir -p "$APP_PATH/Contents/MacOS"
-mkdir -p "$APP_PATH/Contents/Resources"
-mkdir -p "$APP_PATH/Contents/Frameworks"
-
-# Find the binary (try multiple locations, from MacLauncher directory)
-BINARY_PATH=""
-
-# First try the exact path from swift build
-if [ -f "$BUILD_OUTPUT/SAMPRunner" ]; then
-    BINARY_PATH="$BUILD_OUTPUT/SAMPRunner"
-    echo "✓ Found at: $BUILD_OUTPUT/SAMPRunner"
-# Try relative from current directory (MacLauncher)
-elif [ -f ".build/release/SAMPRunner" ]; then
-    BINARY_PATH="$MAC_LAUNCHER_DIR/.build/release/SAMPRunner"
-    echo "✓ Found at: .build/release/SAMPRunner"
-elif [ -f ".build/$BUILD_ARCH-apple-macosx/release/SAMPRunner" ]; then
-    BINARY_PATH="$MAC_LAUNCHER_DIR/.build/$BUILD_ARCH-apple-macosx/release/SAMPRunner"
-    echo "✓ Found at: .build/$BUILD_ARCH-apple-macosx/release/SAMPRunner"
-# Try absolute path construction
-elif [ -f "$MAC_LAUNCHER_DIR/.build/$BUILD_ARCH-apple-macosx/release/SAMPRunner" ]; then
-    BINARY_PATH="$MAC_LAUNCHER_DIR/.build/$BUILD_ARCH-apple-macosx/release/SAMPRunner"
-    echo "✓ Found at: $MAC_LAUNCHER_DIR/.build/$BUILD_ARCH-apple-macosx/release/SAMPRunner"
-else
-    echo "❌ Error: Could not find SAMPRunner binary!"
-    echo "   Searched in:"
-    echo "   - $BUILD_OUTPUT/SAMPRunner"
-    echo "   - .build/release/SAMPRunner"
-    echo "   - .build/$BUILD_ARCH-apple-macosx/release/SAMPRunner"
-    echo "   - $MAC_LAUNCHER_DIR/.build/$BUILD_ARCH-apple-macosx/release/SAMPRunner"
-    echo ""
-    echo "   Listing .build directory contents:"
-    ls -la .build/ 2>/dev/null || echo "   .build directory not found"
-    find .build -name "SAMPRunner" -type f 2>/dev/null || echo "   No SAMPRunner binary found in .build"
-    exit 1
-fi
-
-echo "Copying binary from: $BINARY_PATH"
-
-# Copy binary
-cp "$BINARY_PATH" "$APP_PATH/Contents/MacOS/SA-MP Runner"
-chmod +x "$APP_PATH/Contents/MacOS/SA-MP Runner"
-
-# Copy Wine binaries (if bundled)
-if [ -d "$MAC_LAUNCHER_DIR/Resources/wine" ]; then
-    echo "  Copying Wine..."
-    cp -R "$MAC_LAUNCHER_DIR/Resources/wine" "$APP_PATH/Contents/Resources/"
-fi
-
-# Copy DXVK files
-if [ -d "$PROJECT_ROOT/WineEngine/dlls" ]; then
-    echo "  Copying DXVK..."
-    mkdir -p "$APP_PATH/Contents/Resources/dxvk"
-    cp -R "$PROJECT_ROOT/WineEngine/dlls" "$APP_PATH/Contents/Resources/dxvk/"
-fi
-
-# Copy DXVK config
-if [ -f "$PROJECT_ROOT/GameOptimizations/dxvk/dxvk.conf" ]; then
-    cp "$PROJECT_ROOT/GameOptimizations/dxvk/dxvk.conf" "$APP_PATH/Contents/Resources/"
-fi
-
-# Create Info.plist
-echo "  Creating Info.plist..."
-cat > "$APP_PATH/Contents/Info.plist" << 'EOF'
+cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -147,46 +54,33 @@ cat > "$APP_PATH/Contents/Info.plist" << 'EOF'
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.0</string>
+    <string>$VERSION</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>$VERSION</string>
     <key>LSMinimumSystemVersion</key>
-    <string>11.0</string>
-    <key>NSHighResolutionCapable</key>
-    <true/>
-    <key>NSSupportsAutomaticGraphicsSwitching</key>
-    <true/>
+    <string>13.0</string>
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.games</string>
-    <key>NSHumanReadableCopyright</key>
-    <string>Copyright © 2024. All rights reserved.</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
 </dict>
 </plist>
-EOF
+PLIST
 
-# Create app icon (placeholder)
-# TODO: Create actual icon
-echo "  Creating icon placeholder..."
-mkdir -p "$APP_PATH/Contents/Resources/AppIcon.iconset"
-
-# Set icon (if available)
-if [ -f "$MAC_LAUNCHER_DIR/Resources/AppIcon.icns" ]; then
-    cp "$MAC_LAUNCHER_DIR/Resources/AppIcon.icns" "$APP_PATH/Contents/Resources/"
+if [[ -f "$PACKAGE/Resources/AppIcon.icns" ]]; then
+    cp "$PACKAGE/Resources/AppIcon.icns" "$APP/Contents/Resources/"
+    /usr/libexec/PlistBuddy -c "Add :CFBundleIconFile string AppIcon" "$APP/Contents/Info.plist"
 fi
 
-echo "✓ Application bundle created"
+echo "==> Signing (ad-hoc)"
+codesign --force --sign - "$APP/Contents/MacOS/samp-runner"
+codesign --force --sign - "$APP"
+codesign --force --sign - "$OUT/samp-runner"
 
-# Code signing (for development)
-echo "🔏 Code signing..."
-codesign --force --deep --sign - "$APP_PATH" || echo "⚠️  Code signing failed (this is OK for development)"
-
-echo ""
-echo "✅ Build complete!"
-echo ""
-echo "Application: $APP_PATH"
-echo ""
-echo "To run:"
-echo "  open \"$APP_PATH\""
-echo ""
-echo "To install:"
-echo "  cp -R \"$APP_PATH\" /Applications/"
+echo
+echo "Built:"
+echo "  $APP"
+echo "  $OUT/samp-runner   (command-line tool; also inside the app bundle)"
+echo
+echo "Run:      open \"$APP\""
+echo "Install:  cp -R \"$APP\" /Applications/"

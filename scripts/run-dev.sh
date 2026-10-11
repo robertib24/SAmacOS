@@ -1,17 +1,12 @@
 #!/bin/bash
+# Runs the launcher straight from source (debug build).
+#   ./scripts/run-dev.sh            the SwiftUI app
+#   ./scripts/run-dev.sh doctor     any samp-runner CLI command
+set -euo pipefail
 
-# Development Run Script
-# Runs SA-MP Runner in development mode
+PACKAGE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/MacLauncher"
 
-set -e
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-MAC_LAUNCHER_DIR="$PROJECT_ROOT/MacLauncher"
-
-echo "🚀 Running SA-MP Runner (Development Mode)..."
-
-cd "$MAC_LAUNCHER_DIR"
-
-# Build and run
-swift run SAMPRunner
+if [[ $# -gt 0 ]]; then
+    exec swift run --package-path "$PACKAGE" samp-runner "$@"
+fi
+exec swift run --package-path "$PACKAGE" SAMPRunner
