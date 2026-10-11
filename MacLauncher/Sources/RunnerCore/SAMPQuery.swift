@@ -6,7 +6,7 @@ import Glibc
 #endif
 
 /// Server info returned by the SA-MP query protocol (opcode `i`).
-public struct ServerInfo: Equatable {
+public struct ServerInfo: Equatable, Sendable {
     public var passworded: Bool
     public var players: Int
     public var maxPlayers: Int

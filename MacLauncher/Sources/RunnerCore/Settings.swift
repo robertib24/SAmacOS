@@ -1,7 +1,7 @@
 import Foundation
 
 /// How Direct3D 9 (what GTA SA uses) gets turned into something the Mac GPU runs.
-public enum Renderer: String, Codable, CaseIterable, Identifiable {
+public enum Renderer: String, Codable, CaseIterable, Identifiable, Sendable {
     /// wined3d -> Vulkan -> MoltenVK -> Metal. With WoW64 Wine, Vulkan memory maps
     /// straight into the 32-bit game, avoiding the buffer copies the OpenGL path makes.
     case vulkan
@@ -27,7 +27,7 @@ public enum Renderer: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-public struct Settings: Codable, Equatable {
+public struct Settings: Codable, Equatable, Sendable {
     /// Pinned runtime id from `WineRuntime.catalog`, ignored when `customWinePath` is set.
     public var runtimeID: String = WineRuntime.recommended.id
     /// Path to any `wine` binary (e.g. a CrossOver or Sikarugir engine) to use instead.

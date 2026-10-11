@@ -53,7 +53,12 @@ final class SAMPQueryTests: XCTestCase {
         var len = socklen_t(MemoryLayout<sockaddr_in>.size)
         let bound = withUnsafeMutablePointer(to: &addr) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { ptr -> Int32 in
-                guard bind(fd, ptr, len) == 0 else { return -1 }
+                // Qualified: on macOS, XCTestCase inherits an unrelated `bind` method.
+                #if canImport(Darwin)
+                guard Darwin.bind(fd, ptr, len) == 0 else { return -1 }
+                #else
+                guard Glibc.bind(fd, ptr, len) == 0 else { return -1 }
+                #endif
                 return getsockname(fd, ptr, &len)
             }
         }
@@ -91,12 +96,15 @@ final class SAMPQueryTests: XCTestCase {
         func str(_ s: String) -> [UInt8] {
             let b = Array(s.utf8)
             let n = UInt32(b.count)
-            return [UInt8(n & 0xFF), UInt8(n >> 8 & 0xFF), UInt8(n >> 16 & 0xFF), UInt8(n >> 24)] + b
+            let length: [UInt8] = [UInt8(n & 0xFF), UInt8((n >> 8) & 0xFF), UInt8((n >> 16) & 0xFF), UInt8(n >> 24)]
+            return length + b
         }
-        return Array("SAMP".utf8) + [127, 0, 0, 1, 0x61, 0x1E, 0x69, password ? 1 : 0,
-                                     UInt8(players & 0xFF), UInt8(players >> 8),
-                                     UInt8(maxPlayers & 0xFF), UInt8(maxPlayers >> 8)]
-            + str(hostname) + str(gamemode) + str(language)
+        let header: [UInt8] = Array("SAMP".utf8) + [127, 0, 0, 1, 0x61, 0x1E, 0x69]
+        let counts: [UInt8] = [password ? 1 : 0,
+                               UInt8(players & 0xFF), UInt8(players >> 8),
+                               UInt8(maxPlayers & 0xFF), UInt8(maxPlayers >> 8)]
+        let strings: [UInt8] = str(hostname) + str(gamemode) + str(language)
+        return header + counts + strings
     }
 }
 

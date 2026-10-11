@@ -7,7 +7,7 @@ import Foundation
 /// on 2026-09-01 because they aren't notarized). They are WoW64 builds: one
 /// 64-bit `wine` that runs 32-bit games like GTA SA without the old 32-on-64 hacks,
 /// and they bundle MoltenVK + the Vulkan loader.
-public struct WineRuntime: Equatable, Identifiable {
+public struct WineRuntime: Equatable, Identifiable, Sendable {
     public let id: String
     public let displayName: String
     public let version: String
@@ -63,7 +63,7 @@ public struct WineRuntime: Equatable, Identifiable {
 }
 
 /// The concrete Wine binaries a launch will use.
-public struct ResolvedRuntime: Equatable {
+public struct ResolvedRuntime: Equatable, Sendable {
     public let wine: URL
     public let wineserver: URL
     public let label: String

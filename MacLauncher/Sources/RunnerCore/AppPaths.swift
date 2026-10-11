@@ -11,7 +11,7 @@ import Foundation
 ///     downloads/                             partial downloads
 ///     settings.json, favorites.json
 ///     wine/                                  prefix from the old launcher (legacy, import only)
-public struct AppPaths: Equatable {
+public struct AppPaths: Equatable, Sendable {
     public let root: URL
 
     public init(root: URL) {

@@ -1,6 +1,6 @@
 import Foundation
 
-public enum LaunchTarget: Equatable {
+public enum LaunchTarget: Equatable, Sendable {
     /// samp.exe's own server browser.
     case sampBrowser
     /// Straight into a server: `samp.exe host:port`, nickname from the registry.
@@ -9,7 +9,7 @@ public enum LaunchTarget: Equatable {
     case singlePlayer
 }
 
-public struct SessionResult {
+public struct SessionResult: Sendable {
     public let exitCode: Int32
     public let duration: TimeInterval
     public let logFile: URL

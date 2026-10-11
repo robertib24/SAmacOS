@@ -1,6 +1,6 @@
 import Foundation
 
-public struct ServerAddress: Hashable, Codable, CustomStringConvertible {
+public struct ServerAddress: Hashable, Codable, CustomStringConvertible, Sendable {
     public let host: String
     public let port: UInt16
 

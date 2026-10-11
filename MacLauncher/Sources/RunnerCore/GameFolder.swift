@@ -18,7 +18,7 @@ public struct GameFolder {
     public var hasSAMP: Bool { exists(sampExecutable) && exists(sampLibrary) }
 
     /// SA-MP 0.3.7 only works with the 1.0 US executable.
-    public enum ExecutableKind: Equatable {
+    public enum ExecutableKind: Equatable, Sendable {
         case v1_0_US
         case unknown(bytes: Int64)
         case missing

@@ -4,7 +4,7 @@ import FoundationNetworking
 #endif
 
 /// A server shown in the browser, from the open.mp list, favorites, or a live query.
-public struct ServerEntry: Codable, Hashable, Identifiable {
+public struct ServerEntry: Codable, Hashable, Identifiable, Sendable {
     public var address: ServerAddress
     public var name: String
     public var players: Int?

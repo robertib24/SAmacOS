@@ -1,7 +1,7 @@
 import Foundation
 
 /// Frame pacing summary from a benchmark session.
-public struct BenchmarkResult: Codable, Equatable {
+public struct BenchmarkResult: Codable, Equatable, Sendable {
     public let frames: Int
     public let seconds: Double
     public let averageFPS: Double

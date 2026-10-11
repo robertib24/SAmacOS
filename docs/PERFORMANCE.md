@@ -1,346 +1,69 @@
-# Performance Guide for SA-MP macOS Runner
-
-## Expected Performance
-
-### Apple Silicon (M1/M2/M3)
-
-| Model | Resolution | Settings | FPS | Notes |
-|-------|-----------|----------|-----|-------|
-| M1 | 1080p | High | 60-90 | Perfect for most scenarios |
-| M1 | 1440p | Medium | 55-75 | Good balance |
-| M1 Pro/Max | 1440p | High | 75-100 | Excellent performance |
-| M1 Pro/Max | 4K | Medium | 45-60 | Playable |
-| M2/M3 | 1080p | Ultra | 90-120 | Best experience |
-| M2/M3 | 1440p | High | 70-100 | Recommended |
-
-### Intel Macs
-
-| GPU | Resolution | Settings | FPS | Notes |
-|-----|-----------|----------|-----|-------|
-| Intel Iris | 1080p | Low | 30-45 | Minimum playable |
-| AMD Radeon 5300M | 1080p | Medium | 45-60 | Good |
-| AMD Radeon 5500M+ | 1080p | High | 60-80 | Very good |
-| AMD Radeon Pro 5700 | 1440p | High | 55-75 | Excellent |
-
-## Performance Optimization Tips
-
-### 1. Graphics Settings
+# Performance guide (Apple Silicon, 8 GB)
 
-**Low Settings (30-45 FPS target):**
-- Resolution: 1280x720 or 1920x1080
-- Draw Distance: 0.8
-- Anti-Aliasing: Off
-- Visual FX: Low
-- Frame Limiter: Off
+## Where the time goes
 
-**Medium Settings (45-60 FPS target):**
-- Resolution: 1920x1080
-- Draw Distance: 1.0
-- Anti-Aliasing: On
-- Visual FX: Medium
-- Frame Limiter: Off
+GTA San Andreas is a 2004 game. An M2's GPU renders it with almost no effort, so **the bottleneck is the CPU**:
 
-**High Settings (60+ FPS target):**
-- Resolution: 1920x1080
-- Draw Distance: 1.2
-- Anti-Aliasing: On
-- Visual FX: High
-- Frame Limiter: Off
+1. **Rosetta 2** translates Wine's x86 code to ARM. That's fast, but every instruction still goes through it.
+2. **Wine** turns Windows calls into macOS calls.
+3. **Direct3D 9 translation**: GTA SA issues thousands of small draw calls per frame. wined3d processes each one on a separate render thread (`csmt`, on by default) and hands it to Vulkan or OpenGL.
+4. **GTA SA itself** is single-threaded and does more work as draw distance grows.
 
-**Ultra Settings (90+ FPS target, M2+ only):**
-- Resolution: 2560x1440
-- Draw Distance: 1.5
-- Anti-Aliasing: On
-- Visual FX: Very High
-- Frame Limiter: Off
-
-### 2. DXVK Optimizations
-
-#### Shader Compilation
-
-The first time you run the game, DXVK will compile shaders on-the-fly. This causes stuttering.
-
-**Solutions:**
-- Let the game run for 10-15 minutes to build shader cache
-- Download pre-compiled shader cache (if available)
-- Enable DXVK async mode (enabled by default)
-
-#### DXVK Configuration
+The settings that help most therefore reduce **CPU work per frame**: draw distance, visual effects, objects on screen. Dropping resolution to 640×480, as the 1.x launcher did, barely helps, because the GPU wasn't the problem. Retina mode is the exception. It quadruples the pixel count, so keep it off.
 
-Edit `~/Library/Application Support/SA-MP Runner/dxvk_cache/dxvk.conf`:
-
-**For maximum performance:**
-```ini
-dxvk.enableAsync = True
-dxvk.numCompilerThreads = 0  # Use all cores
-dxvk.maxFrameLatency = 1
-dxvk.maxDeviceMemory = 8192  # If you have 16GB+ RAM
-```
+## Renderer: Vulkan vs OpenGL
 
-**For reduced stuttering:**
-```ini
-dxvk.enableAsync = True
-dxvk.numCompilerThreads = 4
-dxvk.maxFrameLatency = 2
-```
+Current macOS Wine builds use **WoW64**: a single 64-bit Wine runs 32-bit games like GTA SA. When a 32-bit game maps a GPU buffer:
 
-### 3. macOS System Optimizations
+- **OpenGL path**: macOS returns a 64-bit pointer the 32-bit game can't use. Unless it happens to land below 4 GB, Wine allocates a low-memory buffer and **copies** the data in and out ("Doing a copy of a mapped buffer (expect performance issues)" in `dlls/opengl32/unix_wgl.c`).
+- **Vulkan path**: Wine maps the memory directly into the 32-bit address space (`VK_EXT_map_memory_placed` or `VK_EXT_external_memory_host` in `dlls/win32u/vulkan.c`). No copies.
 
-#### Close Background Apps
-- Quit unnecessary applications
-- Disable automatic backups during gameplay
-- Close web browsers (Chrome/Firefox use a lot of RAM)
+That's why **Vulkan is the default**. wined3d's Vulkan renderer is younger than its OpenGL one, so if you see missing textures, flicker or a black screen, switch to **OpenGL** in Settings (or `samp-runner config renderer opengl`). Better still, measure both:
 
-#### Energy Settings
-```bash
-# Disable App Nap for SA-MP Runner
-defaults write com.samprunner.macos NSAppSleepDisabled -bool YES
-
-# Set GPU to prefer performance
-sudo pmset -a gpuswitch 2  # Force discrete GPU (if available)
-```
+## Measuring (do this, it's quick)
 
-#### Monitor Performance
-```bash
-# Check GPU usage
-sudo powermetrics --samplers gpu_power -i 1000
+1. Settings › **Benchmark mode** on (CLI: `samp-runner config benchmark on`).
+2. Play 2–3 minutes in a repeatable spot, for example the same drive along the same street on the same server. Loading screens and the first 10 seconds are ignored.
+3. Close the game. The Play screen shows **average FPS**, **1% low** (average of the slowest 1% of frames, which is what stutter feels like) and the worst frame time.
+4. Switch renderer, repeat, compare.
 
-# Check CPU usage per core
-top -o cpu
-```
+Benchmark mode makes Wine log one line per frame, which costs a little CPU. Turn it off for normal play. For a live counter use **Show Metal performance HUD** instead.
 
-### 4. Wine Optimizations
+## In-game settings (M2, 8 GB)
 
-#### Enable Esync/Fsync
+| Setting | Recommendation | Why |
+|---|---|---|
+| Frame Limiter | **Off** | On, the game caps at 25–30 FPS. Off, SA-MP's `fpslimit` (launcher setting, default 60) caps it. |
+| Resolution | 1440×900 or 1280×800 | Matches the 13" MacBook's default "looks like" size. GPU cost is small either way. |
+| Draw Distance | Medium, raise if FPS allows | The biggest CPU cost, especially on mapped servers. |
+| Visual FX Quality | Low/Medium | Shadows and effects add draw calls. |
+| Anti-aliasing | Off | Cheap on GPU, but no benefit at this resolution. |
 
-Esync reduces CPU overhead for synchronization:
+Use SA-MP's in-game `/fpslimit` to try caps quickly. The launcher's value is written to `sa-mp.cfg` at every launch.
 
-```bash
-# Check if esync is available
-export WINEESYNC=1
-wine --version  # Should mention esync support
-```
+## macOS side
 
-If available, it's enabled by default in SA-MP Runner.
+- **Low Power Mode off** while playing (`samp-runner doctor` warns about it). It caps CPU and GPU clocks.
+- **Memory**: Wine, GTA SA and SA-MP need roughly 1–1.5 GB. On 8 GB, browsers and Electron apps (Discord, Slack, VS Code) push the system into swap, which shows up as long stutters. Check Activity Monitor › Memory › *Memory Pressure*. Yellow or red means close something.
+- **Disk**: keep 10+ GB free so swap has room.
+- **Thermals**: the 13-inch MacBook Pro (M2) has a fan and rarely throttles. If `doctor` reports throttling, check the vents.
 
-#### Memory Tweaks
+## What the launcher sets and why
 
-Increase streaming memory for better texture loading:
+| Setting | Value | Purpose |
+|---|---|---|
+| `WINE_D3D_CONFIG` | `renderer=vulkan\|gl;csmt=0x1;VideoMemorySize=2048` | Renderer per launch, threaded command stream, VRAM reported to the game |
+| `WINEDEBUG` | `-all` | Wine logging costs CPU, so it's off unless benchmarking (`+frametime`) or `--verbose` |
+| `WINEDLLOVERRIDES` | `mscoree,mshtml=;winemenubuilder.exe=d;d3d9=b` | No Mono/Gecko installs, no Launchpad entries, always Wine's d3d9 (unless you allow d3d9.dll mods) |
+| `MVK_CONFIG_RESUME_LOST_DEVICE` | `1` | Recover instead of crashing if Metal reports a lost device |
+| `MTL_HUD_ENABLED` | `1` (optional) | Apple's Metal performance HUD |
+| Mac Driver `RetinaMode` | `n` | Render at "looks like" resolution, not 4× pixels |
+| Process QoS | user-interactive | Keeps Wine on the performance cores |
+| `sa-mp.cfg` | `fpslimit=<cap>`, `multicore=1` | SA-MP frame cap and its second-core option |
 
-```bash
-# Set in Wine registry
-wine reg add "HKCU\\Software\\Wine\\DirectDraw" /v VideoMemorySize /t REG_SZ /d "2048" /f
-```
+Not used, on purpose: esync/fsync (Linux kernel features), DXVK/DXVK_ASYNC (no working D3D9 on MoltenVK), `__GL_*` (NVIDIA Linux driver), `WINE_CPU_TOPOLOGY` (thread affinity isn't supported on macOS).
 
-### 5. In-Game Settings
+## Ideas not shipped yet
 
-#### Optimal gta_sa.set
-
-Location: `~/Library/Application Support/SA-MP Runner/wine/drive_c/Program Files/Rockstar Games/GTA San Andreas/gta_sa.set`
-
-```ini
-[Display]
-Width=1920
-Height=1080
-Depth=32
-Windowed=0
-VSync=0
-FrameLimiter=0  # IMPORTANT: Always 0 for maximum FPS
-
-[Graphics]
-VideoMode=1
-Brightness=0
-DrawDistance=1.2
-AntiAliasing=1
-VisualFX=2
-MipMapping=1
-```
-
-### 6. Network Optimizations
-
-For online play (SA-MP):
-
-#### Reduce Ping
-```bash
-# Flush DNS cache
-sudo dscacheutil -flushcache
-sudo killall -HUP mDNSResponder
-
-# Use Google DNS
-networksetup -setdnsservers Wi-Fi 8.8.8.8 8.8.4.4
-```
-
-#### TCP Optimizations
-Wine uses native BSD sockets, so network performance should be good by default.
-
-## Troubleshooting Performance Issues
-
-### Low FPS (< 30)
-
-**Possible causes:**
-1. Integrated GPU (Intel Iris)
-2. Background apps consuming resources
-3. Thermal throttling
-4. Wrong graphics settings
-
-**Solutions:**
-1. Lower graphics settings to "Low" preset
-2. Close all background applications
-3. Use cooling pad or improve ventilation
-4. Check Activity Monitor for CPU/GPU hogs
-
-### Stuttering
-
-**Causes:**
-1. Shader compilation (first run)
-2. Disk I/O (HDD instead of SSD)
-3. Insufficient RAM
-4. DXVK state cache building
-
-**Solutions:**
-1. Let game run for 10-15 minutes
-2. Move game to SSD
-3. Close memory-hungry apps
-4. Download pre-compiled shader cache
-
-### Input Lag
-
-**Causes:**
-1. VSync enabled
-2. High frame latency
-3. macOS mouse acceleration
-
-**Solutions:**
-```bash
-# Disable VSync in game settings
-# Set DXVK frame latency to 1
-dxvk.maxFrameLatency = 1
-
-# Disable mouse acceleration (macOS)
-defaults write .GlobalPreferences com.apple.mouse.scaling -1
-```
-
-### Crashes
-
-**Causes:**
-1. Out of memory
-2. Incompatible mods
-3. Wine instability
-
-**Solutions:**
-1. Increase swap space
-2. Remove mods one by one
-3. Update Wine to latest version
-4. Check logs: `~/Library/Application Support/SA-MP Runner/logs/`
-
-## Performance Monitoring
-
-### Built-in FPS Counter
-
-Enable DXVK HUD:
-```bash
-export DXVK_HUD=fps,devinfo,memory
-```
-
-### Detailed Profiling
-
-```bash
-# CPU usage per core
-top -pid $(pgrep -f "SA-MP Runner") -stats pid,cpu,mem,threads
-
-# GPU usage
-sudo powermetrics --samplers gpu_power -i 1000
-
-# Memory usage
-vmmap $(pgrep -f "SA-MP Runner")
-```
-
-## Benchmarking
-
-### Quick Benchmark
-
-1. Launch game
-2. Load single player
-3. Go to Los Santos airport
-4. Face towards city
-5. Note average FPS
-
-**Expected results:**
-- M1: 70-90 FPS
-- M2: 90-120 FPS
-- Intel (dedicated): 50-70 FPS
-
-### Advanced Benchmark
-
-Use the built-in performance logger:
-
-```bash
-# Enable performance logging
-defaults write com.samprunner.macos PerformanceLogging -bool YES
-
-# Play for 10 minutes
-# Check logs
-cat ~/Library/Application\ Support/SA-MP\ Runner/logs/performance.log
-```
-
-## Best Practices
-
-1. **Always use SSD** - HDD will cause stuttering
-2. **Keep macOS updated** - Metal performance improves with updates
-3. **Use Auto preset** - Launcher detects optimal settings
-4. **Disable frame limiter** - Let your Mac run at maximum FPS
-5. **Close background apps** - Especially browsers and Electron apps
-6. **Monitor temperatures** - Use iStat Menus or similar
-7. **Regular shader cache cleanup** - Once a month, clear and rebuild
-8. **Update Wine** - Check for updates monthly
-
-## Performance Comparison
-
-### Wine vs Virtual Machine
-
-| Method | Performance | Compatibility | Setup |
-|--------|-------------|---------------|-------|
-| SA-MP Runner (Wine) | 90-95% | Excellent | Easy |
-| Parallels | 70-80% | Good | Medium |
-| VMware | 60-70% | Good | Medium |
-| Boot Camp | 100% | Perfect | Hard |
-
-Wine (SA-MP Runner) provides near-native performance without dual-booting!
-
-## Future Optimizations
-
-Planned improvements:
-
-1. **MetalFX Integration** (macOS 13+)
-   - Upscaling technology
-   - Better performance at high resolutions
-
-2. **Game Porting Toolkit** (macOS 14+)
-   - Apple's official DirectX translation
-   - Potentially better than DXVK+MoltenVK
-
-3. **Custom Wine Patches**
-   - macOS-specific optimizations
-   - Reduced syscall overhead
-
-4. **Shader Pre-compilation**
-   - Ship with pre-compiled shaders
-   - Zero stuttering on first run
-
-## Getting Help
-
-If you're experiencing performance issues:
-
-1. Check system requirements
-2. Review this guide
-3. Check logs: `~/Library/Application Support/SA-MP Runner/logs/`
-4. Report issue with:
-   - Mac model and specs
-   - macOS version
-   - In-game settings
-   - Average FPS
-   - Log files
-
----
-
-**Remember:** GTA San Andreas is from 2004. Even low-end modern Macs should run it well with proper configuration!
+- **D3D9 to Metal directly**: forks of DXMT and the separate `dx9mt` project are experimenting with it. If one matures, it could remove the Vulkan/OpenGL hop entirely, and the launcher's renderer switch is the place to add it.
+- **dgVoodoo2 (D3D9 to D3D11) + DXMT**: possible today, but untested with SA-MP and stacks two translation layers.

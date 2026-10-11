@@ -1,7 +1,7 @@
 import Foundation
 
-public struct DiagnosticCheck: Identifiable {
-    public enum Level: String { case ok, info, warning, error }
+public struct DiagnosticCheck: Identifiable, Sendable {
+    public enum Level: String, Sendable { case ok, info, warning, error }
 
     public let id = UUID()
     public let level: Level
