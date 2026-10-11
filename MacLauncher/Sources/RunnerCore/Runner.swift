@@ -52,8 +52,9 @@ public final class GameSession {
 }
 
 /// High-level operations shared by the CLI and the app. Methods block while Wine
-/// works, so call them off the main thread.
-public final class Runner {
+/// works, so call them off the main thread. Mutable state (settings, the current
+/// session) is lock-protected, so it can be used from any thread.
+public final class Runner: @unchecked Sendable {
     public let paths: AppPaths
     public let settingsStore: SettingsStore
     public let favorites: FavoritesStore
@@ -151,6 +152,49 @@ public final class Runner {
     public func removeLegacyPrefix() throws {
         guard fileManager.fileExists(atPath: paths.legacyPrefix.path) else { return }
         try fileManager.removeItem(at: paths.legacyPrefix)
+    }
+
+    /// Deletes and recreates the prefix, keeping the game folder and the
+    /// "GTA San Andreas User Files" (settings, SA-MP favorites, chat logs).
+    /// If a previous reset was interrupted, its saved files are restored.
+    public func resetPrefix(progress: ((String) -> Void)? = nil) throws {
+        let prefix = try self.prefix()
+        let saved = paths.root.appendingPathComponent(".prefix-reset", isDirectory: true)
+        let savedGame = saved.appendingPathComponent("game", isDirectory: true)
+        let savedUserFiles = saved.appendingPathComponent("user-files", isDirectory: true)
+
+        progress?("Closing Wine…")
+        prefix.killAll()
+        try fileManager.createDirectory(at: saved, withIntermediateDirectories: true)
+        func stash(_ source: URL?, to destination: URL) throws {
+            guard let source, fileManager.fileExists(atPath: source.path) else { return }
+            if fileManager.fileExists(atPath: destination.path) {
+                throw CocoaError(.fileWriteFileExists, userInfo: [NSFilePathErrorKey: destination.path,
+                    NSLocalizedDescriptionKey: "\(destination.path) is left over from an interrupted reset. Move it somewhere safe and try again."])
+            }
+            try fileManager.moveItem(at: source, to: destination)
+        }
+        try stash(paths.gameDirectory, to: savedGame)
+        try stash(paths.userFilesDirectory(fileManager: fileManager), to: savedUserFiles)
+
+        progress?("Recreating the Wine prefix…")
+        if fileManager.fileExists(atPath: paths.prefix.path) {
+            try fileManager.removeItem(at: paths.prefix)
+        }
+        try prefix.create()
+
+        func restore(_ source: URL, to destination: URL?) throws {
+            guard let destination, fileManager.fileExists(atPath: source.path) else { return }
+            try fileManager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if fileManager.fileExists(atPath: destination.path) { try fileManager.removeItem(at: destination) }
+            try fileManager.moveItem(at: source, to: destination)
+        }
+        try restore(savedGame, to: paths.gameDirectory)
+        try restore(savedUserFiles, to: paths.userFilesDirectory(fileManager: fileManager))
+        try? fileManager.removeItem(at: saved)
+
+        progress?("Applying settings…")
+        try applyConfiguration(prefix: prefix)
     }
 
     /// Runs a Windows installer (e.g. the SA-MP client installer) and waits for it.

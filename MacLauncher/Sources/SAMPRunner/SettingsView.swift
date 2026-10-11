@@ -4,6 +4,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject private var model: LauncherModel
+    @State private var confirmReset = false
 
     private var fpsLimit: Binding<Double> {
         Binding(get: { Double(model.settings.fpsLimit) },
@@ -75,8 +76,16 @@ struct SettingsView: View {
                     Button("Wine Configuration…") { model.openWineTool("winecfg") }
                     Button("Show Game Folder") { model.reveal(model.paths.gameDirectory) }
                     Button("Show Logs") { model.reveal(model.paths.logs) }
+                    Spacer()
+                    Button("Recreate Wine Prefix…") { confirmReset = true }
+                        .disabled(model.isBusy || model.isRunning)
                 }
                 .disabled(!model.setup.prefixReady)
+                .confirmationDialog("Recreate the Wine prefix?", isPresented: $confirmReset) {
+                    Button("Recreate", role: .destructive) { Task { await model.resetPrefix() } }
+                } message: {
+                    Text("Fixes a broken Windows environment. Your game folder, settings and SA-MP favorites are kept; anything else installed into the prefix is removed.")
+                }
             } header: {
                 Text("Wine")
             }

@@ -101,6 +101,28 @@ final class RunnerIntegrationTests: XCTestCase {
         XCTAssertTrue(report.contains("wine-11.18"))
     }
 
+    func testResetPrefixKeepsGameAndUserFiles() throws {
+        let runner = Runner(paths: paths)
+        try runner.preparePrefix()
+        let source = try temporaryDirectory()
+        try Data("x".utf8).write(to: source.appendingPathComponent("gta_sa.exe"))
+        try runner.importGame(from: source)
+        let userFiles = try XCTUnwrap(paths.userFilesDirectory())
+        try FileManager.default.createDirectory(at: userFiles.appendingPathComponent("SAMP"), withIntermediateDirectories: true)
+        try Data("favorites".utf8).write(to: userFiles.appendingPathComponent("SAMP/USERDATA.DAT"))
+        let junk = paths.driveC.appendingPathComponent("windows/junk.txt")
+        try FileManager.default.createDirectory(at: junk.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data().write(to: junk)
+
+        try runner.resetPrefix()
+
+        XCTAssertTrue(runner.game.hasGame)
+        XCTAssertEqual(try Data(contentsOf: userFiles.appendingPathComponent("SAMP/USERDATA.DAT")), Data("favorites".utf8))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: junk.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: paths.root.appendingPathComponent(".prefix-reset").path))
+        XCTAssertEqual(try callLines().filter { $0.hasPrefix("wineboot") }.count, 2)
+    }
+
     func testNicknameIsValidatedBeforeLaunch() throws {
         let runner = Runner(paths: paths)
         try runner.updateSettings { $0.nickname = "No Spaces Allowed" }

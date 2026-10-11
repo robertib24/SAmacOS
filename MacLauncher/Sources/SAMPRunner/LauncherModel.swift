@@ -42,7 +42,7 @@ final class LauncherModel: ObservableObject {
     }
 
     @Published var section: Section? = .play
-    @Published private(set) var settings: Settings
+    @Published private(set) var settings: RunnerCore.Settings
     @Published private(set) var setup = SetupState()
     @Published private(set) var busyMessage: String?
     @Published private(set) var progress: Double?
@@ -96,12 +96,12 @@ final class LauncherModel: ObservableObject {
 
     // MARK: - Settings
 
-    func binding<Value>(_ keyPath: WritableKeyPath<Settings, Value>) -> Binding<Value> {
+    func binding<Value>(_ keyPath: WritableKeyPath<RunnerCore.Settings, Value>) -> Binding<Value> {
         Binding(get: { self.settings[keyPath: keyPath] },
                 set: { value in self.update { $0[keyPath: keyPath] = value } })
     }
 
-    func update(_ change: (inout Settings) -> Void) {
+    func update(_ change: (inout RunnerCore.Settings) -> Void) {
         var updated = settings
         change(&updated)
         let runtimeChanged = updated.runtimeID != settings.runtimeID || updated.customWinePath != settings.customWinePath
@@ -194,6 +194,10 @@ final class LauncherModel: ObservableObject {
                 try $0.runInstaller(url)
             }
         }
+    }
+
+    func resetPrefix() async {
+        await perform("Recreating the Wine prefix (your game and SA-MP settings are kept)…") { try $0.resetPrefix() }
     }
 
     func disableDXVKLeftovers() async {

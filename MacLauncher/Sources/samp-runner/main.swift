@@ -13,6 +13,7 @@ Setup
   import-legacy [--delete-old]   Move the game out of the old launcher's prefix
   install-samp <installer.exe>   Run an SA-MP client installer inside the prefix
   fix-dxvk                       Disable leftover DXVK DLLs in the game folder
+  reset-prefix --yes             Recreate the Wine prefix, keeping the game and SA-MP user files
 
 Play
   play                           Open SA-MP's server browser
@@ -223,6 +224,13 @@ func run() throws {
     case "fix-dxvk":
         let moved = try runner.game.disableDXVKLeftovers()
         print(moved.isEmpty ? "No DXVK DLLs in the game folder." : "Disabled: " + moved.map(\.lastPathComponent).joined(separator: ", "))
+
+    case "reset-prefix":
+        guard takeFlag("--yes") else {
+            throw CLIError("This deletes and recreates the Wine prefix (the game folder and GTA/SA-MP user files are kept). Run again with --yes.")
+        }
+        try runner.resetPrefix { print("  \($0)") }
+        print("Prefix recreated.")
 
     case "play":
         try waitForSession { try runner.launch(.sampBrowser, verbose: verbose, onExit: $0) }

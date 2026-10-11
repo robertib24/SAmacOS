@@ -10,7 +10,7 @@ jobs:
     name: macOS build & tests
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Toolchain
         run: swift --version
       - name: Tests
@@ -31,6 +31,6 @@ jobs:
     runs-on: ubuntu-24.04
     container: swift:6.0
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Tests
         run: swift test --package-path MacLauncher
